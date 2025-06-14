@@ -1,0 +1,26 @@
+{
+  "name": "@subspace-chat/sdk",
+  "description": "SDK for Subspace Communicator",
+  "version": "0.0.1",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "Subspace",
+    "Chat",
+    "Arweave",
+    "AO",
+    "SDK"
+  ],
+  "author": "ankushKun_",
+  "license": "MIT",
+  "dependencies": {
+    "@dha-team/arbundles": "^1.0.3",
+    "@permaweb/aoconnect": "^0.0.85",
+    "arweave": "^1.15.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.1"
+  }
+}
