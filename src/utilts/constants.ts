@@ -70,5 +70,13 @@ export const Constants = {
         AddDelegation: 'Add-Delegation',
         RemoveDelegation: 'Remove-Delegation',
         RemoveAllDelegations: 'Remove-All-Delegations',
+
+        // Bot actions
+        CreateBot: 'Create-Bot',
+        BotInfo: 'Bot-Info',
+        AddBot: 'Add-Bot',
+        ApproveAddBot: 'Approve-Add-Bot',
+        Subscribe: 'Subscribe',
+        RemoveBot: 'Remove-Bot',
     }
 }

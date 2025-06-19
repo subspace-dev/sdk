@@ -124,3 +124,18 @@ export type getDMsParams = {
     before?: number
     eventId?: number
 }
+
+export type createBotParams = {
+    botName: string
+    botPfp: string
+    publicBot?: boolean
+}
+
+export type addBotParams = {
+    botProcess: string
+    serverId: string
+}
+
+export type removeBotParams = {
+    botProcess: string
+}

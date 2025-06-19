@@ -2619,8 +2619,28 @@ end)
 
 Handlers.add("Remove-Bot", function(msg)
     local userId = msg.From
-
     local botProcess = VarOrNil(msg.Tags.BotProcess)
+
+    -- verify if user has permission to remove bots
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User is not a member of this server"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_BOTS)
+    if ValidateCondition(not hasPermission, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User does not have permission to remove bots"
+            })
+        }) then
+        return
+    end
 
     local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
     if ValidateCondition(not bot, msg, {

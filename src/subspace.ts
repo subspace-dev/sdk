@@ -1,11 +1,12 @@
-import { createServerParams, SubspaceConfig, SubspaceConfigReadOnly } from "./types/inputs";
-import { IProfile, IProfileReadOnly, IServerReadOnly, ISubspace, ISubspaceReadOnly } from "./types/subspace";
+import { addBotParams, createBotParams, createServerParams, removeBotParams, SubspaceConfig, SubspaceConfigReadOnly } from "./types/inputs";
+import { IBotReadOnly, IProfile, IProfileReadOnly, IServerReadOnly, ISubspace, ISubspaceReadOnly } from "./types/subspace";
 import { AoClient, AoSigner } from "./types/ao";
 import { connect } from "@permaweb/aoconnect";
 import { AO } from "./utilts/ao";
 import { Constants } from "./utilts/constants";
 import { Server, ServerReadOnly } from "./server";
 import { Profile } from "./profile";
+import { Bot } from "./bot";
 
 // ---------------- Subspace readonly client ---------------- //
 
@@ -97,6 +98,18 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
         })
 
         return res['OriginalId']
+    }
+
+    async getBot(botProcess: string): Promise<IBotReadOnly | null> {
+        const res = await AO.read({
+            process: Constants.Profiles,
+            action: Constants.Actions.BotInfo,
+            tags: { BotProcess: botProcess },
+            ao: this.ao
+        })
+
+        const data = JSON.parse(res.Data) as IBotReadOnly
+        return data
     }
 }
 
@@ -212,5 +225,66 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
             return server
         }
         throw new Error('Failed to create server')
+    }
+
+    async getBot(botProcess: string): Promise<Bot | null> {
+        const res = await AO.read({
+            process: Constants.Profiles,
+            action: Constants.Actions.BotInfo,
+            tags: { BotProcess: botProcess },
+            ao: this.ao
+        })
+
+        const data = JSON.parse(res.Data) as IBotReadOnly
+        return new Bot(data, this.ao, this.signer)
+    }
+
+    async createBot(params: createBotParams): Promise<Bot> {
+        const res = await AO.write({
+            process: Constants.Profiles,
+            action: Constants.Actions.CreateBot,
+            tags: {
+                BotName: params.botName,
+                BotPfp: params.botPfp,
+                BotPublic: params.publicBot ? "true" : "false"
+            },
+            ao: this.ao,
+            signer: this.signer
+        })
+
+        if (res.tags?.Status === "200" && res.tags?.BotProcess) {
+            const bot = await this.getBot(res.tags.BotProcess)
+            if (bot) return bot
+        }
+        throw new Error('Failed to create bot')
+    }
+
+    async addBot(params: addBotParams): Promise<boolean> {
+        const res = await AO.write({
+            process: Constants.Profiles,
+            action: Constants.Actions.AddBot,
+            tags: {
+                BotProcess: params.botProcess,
+                ServerId: params.serverId
+            },
+            ao: this.ao,
+            signer: this.signer
+        })
+
+        return res.tags?.Status === "200"
+    }
+
+    async removeBot(params: removeBotParams): Promise<boolean> {
+        const res = await AO.write({
+            process: Constants.Profiles,
+            action: Constants.Actions.RemoveBot,
+            tags: {
+                BotProcess: params.botProcess
+            },
+            ao: this.ao,
+            signer: this.signer
+        })
+
+        return res.tags?.Status === "200"
     }
 }

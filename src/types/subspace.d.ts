@@ -1,5 +1,6 @@
+import { Bot } from "../bot"
 import { Profile } from "../profile"
-import { assignRoleParams, createCategoryParams, createChannelParams, createRoleParams, createServerParams, deleteDMParams, editDMParams, editMessageParams, getDMsParams, getMessagesParams, sendDMParams, sendMessageParams, unassignRoleParams, updateCategoryParams, updateChannelParams, updateMemberParams, updateProfileParams, updateRoleParams } from "./inputs"
+import { addBotParams, assignRoleParams, createBotParams, createCategoryParams, createChannelParams, createRoleParams, createServerParams, deleteDMParams, editDMParams, editMessageParams, getDMsParams, getMessagesParams, removeBotParams, sendDMParams, sendMessageParams, unassignRoleParams, updateCategoryParams, updateChannelParams, updateMemberParams, updateProfileParams, updateRoleParams } from "./inputs"
 import { DMResponse, GetMessagesResponse } from "./responses"
 
 // ---------------- Subspace client interfaces ---------------- //
@@ -11,6 +12,7 @@ export interface ISubspaceReadOnly {
     getServer(serverId: string): Promise<IServerReadOnly | null>
 
     getOriginalId(userId: string): Promise<string>
+    getBot(botProcess: string): Promise<IBotReadOnly | null>
 }
 
 // Subspace Writable
@@ -22,6 +24,10 @@ export interface ISubspace extends ISubspaceReadOnly {
 
     createProfile(): Promise<IProfile>
     createServer(params: createServerParams): Promise<IServer>
+
+    createBot(params: createBotParams): Promise<Bot>
+    addBot(params: addBotParams): Promise<boolean>
+    removeBot(params: removeBotParams): Promise<boolean>
 }
 
 // ---------------- Permissions ---------------- //
@@ -39,6 +45,7 @@ export enum EPermissions {
     MENTION_EVERYONE = 1 << 9,  // 512
     ADMINISTRATOR = 1 << 10, // 1024
     ATTACHMENTS = 1 << 11, // 2048
+    MANAGE_BOTS = 1 << 12, // 4096
 }
 
 // ---------------- Readable interfaces ---------------- //
@@ -211,4 +218,14 @@ export interface IMember extends IMemberReadOnly {
 
 export interface IRole extends IRoleReadOnly {
 
+}
+
+
+export interface IBotReadOnly {
+    botProcess: string
+    botName: string
+    botPfp: string
+    botPublic: boolean
+    userId: string
+    totalServers?: number
 }
