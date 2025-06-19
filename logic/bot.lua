@@ -187,5 +187,26 @@ end)
 -- Events sent from servers
 
 Handlers.add("Event-Message", function(msg)
+    local serverId = msg.From
 
+    if ValidateCondition(not JoinedServers[serverId], msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Bot is not in the server"
+            })
+        }) then
+        return
+    end
+
+    if ValidateCondition(not SubscribedServers[serverId], msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Bot is not subscribed to the server"
+            })
+        }) then
+        return
+    end
+
+    -- continue processing message
+    -- TODO
 end)
