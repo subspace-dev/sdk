@@ -10,21 +10,6 @@
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.js",
       "types": "./dist/types/index.d.ts"
-    },
-    "./profile": {
-      "import": "./dist/esm/profile.js",
-      "require": "./dist/cjs/profile.js",
-      "types": "./dist/types/profile.d.ts"
-    },
-    "./server": {
-      "import": "./dist/esm/server.js",
-      "require": "./dist/cjs/server.js",
-      "types": "./dist/types/server.d.ts"
-    },
-    "./bot": {
-      "import": "./dist/esm/bot.js",
-      "require": "./dist/cjs/bot.js",
-      "types": "./dist/types/bot.d.ts"
     }
   },
   "files": [

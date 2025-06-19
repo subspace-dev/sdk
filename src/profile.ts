@@ -1,8 +1,8 @@
 import { deleteDMParams, editDMParams, getDMsParams, sendDMParams, updateProfileParams } from "./types/inputs"
 import { INotificationReadOnly, IProfile } from "./types/subspace"
 import { AoClient, AoSigner } from "./types/ao"
-import { AO } from "./utilts/ao"
-import { Constants } from "./utilts/constants"
+import { AO } from "./utils/ao"
+import { Constants } from "./utils/constants"
 import { DMResponse } from "./types/responses"
 
 // ---------------- Profile implementation ---------------- //

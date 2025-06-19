@@ -7,7 +7,7 @@ import { DMResponse, GetMessagesResponse } from "./responses"
 
 export interface ISubspaceReadOnly {
     getProfile(userId: string): Promise<IProfileReadOnly | null>
-    getBulkProfile(userIds: string[]): Promise<Array<IProfileReadOnly>>
+    getBulkProfiles(userIds: string[]): Promise<Array<IProfileReadOnly>>
     anchorToServer(anchorId: string): Promise<IServerReadOnly>
     getServer(serverId: string): Promise<IServerReadOnly | null>
 
@@ -18,7 +18,7 @@ export interface ISubspaceReadOnly {
 // Subspace Writable
 export interface ISubspace extends ISubspaceReadOnly {
     getProfile(userId: string): Promise<IProfile | null>
-    getBulkProfile(userIds: string[]): Promise<Array<IProfile>>
+    getBulkProfiles(userIds: string[]): Promise<Array<IProfile>>
     anchorToServer(anchorId: string): Promise<IServer>
     getServer(serverId: string): Promise<IServer | null>
 
@@ -56,6 +56,7 @@ export interface IProfileReadOnly {
     dmProcess?: string
     delegations?: string[]
     serversJoined?: Array<{ orderId: number, serverId: string }>
+    primaryName?: string
     friends?: {
         accepted: string[]
         sent: string[]
@@ -204,21 +205,13 @@ export interface IServer extends IServerReadOnly {
     getMessages(params: getMessagesParams): Promise<GetMessagesResponse>
 }
 
-export interface IChannel extends IChannelReadOnly {
+export interface IChannel extends IChannelReadOnly { }
 
-}
+export interface ICategory extends ICategoryReadOnly { }
 
-export interface ICategory extends ICategoryReadOnly {
+export interface IMember extends IMemberReadOnly { }
 
-}
-
-export interface IMember extends IMemberReadOnly {
-
-}
-
-export interface IRole extends IRoleReadOnly {
-
-}
+export interface IRole extends IRoleReadOnly { }
 
 
 export interface IBotReadOnly {

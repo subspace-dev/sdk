@@ -10,3 +10,13 @@ export class Subspace {
         return new SubspaceClientReadOnly(params);
     }
 }
+// Export all types and interfaces for external use
+export * from './types/subspace';
+export * from './types/inputs';
+export * from './types/ao';
+export * from './types/responses';
+// Export main classes
+export { SubspaceClient, SubspaceClientReadOnly } from './subspace';
+export { Profile } from './profile';
+export { Server, ServerReadOnly } from './server';
+export { Bot } from './bot';

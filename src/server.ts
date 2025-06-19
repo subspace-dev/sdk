@@ -2,8 +2,8 @@ import { AoClient, AoSigner } from "./types/ao"
 import { assignRoleParams, createCategoryParams, createChannelParams, createRoleParams, editMessageParams, getMessagesParams, sendMessageParams, unassignRoleParams, updateCategoryParams, updateChannelParams, updateMemberParams, updateRoleParams } from "./types/inputs"
 import { ICategory, ICategoryReadOnly, IChannel, IChannelReadOnly, IMember, IMemberReadOnly, IMessageReadOnly, IRole, IRoleReadOnly, IServer, IServerReadOnly } from "./types/subspace"
 import { GetMessagesResponse } from "./types/responses"
-import { AO } from "./utilts/ao"
-import { Constants } from "./utilts/constants"
+import { AO } from "./utils/ao"
+import { Constants } from "./utils/constants"
 
 // ---------------- Server implementation ---------------- //
 

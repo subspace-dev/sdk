@@ -1,5 +1,5 @@
-import { AO } from "./utilts/ao";
-import { Constants } from "./utilts/constants";
+import { AO } from "./utils/ao";
+import { Constants } from "./utils/constants";
 // ---------------- Server implementation ---------------- //
 export class ServerReadOnly {
     ao;

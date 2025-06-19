@@ -1,5 +1,5 @@
-import { AO } from "./utilts/ao";
-import { Constants } from "./utilts/constants";
+import { AO } from "./utils/ao";
+import { Constants } from "./utils/constants";
 // ---------------- Profile implementation ---------------- //
 export class Profile {
     ao;

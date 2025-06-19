@@ -1,6 +1,6 @@
 import { connect } from "@permaweb/aoconnect";
-import { AO } from "./utilts/ao";
-import { Constants } from "./utilts/constants";
+import { AO } from "./utils/ao";
+import { Constants } from "./utils/constants";
 import { Server, ServerReadOnly } from "./server";
 import { Profile } from "./profile";
 import { Bot } from "./bot";
@@ -27,7 +27,7 @@ export class SubspaceClientReadOnly {
         const data = JSON.parse(res.Data);
         return data;
     }
-    async getBulkProfile(userIds) {
+    async getBulkProfiles(userIds) {
         const res = await AO.read({
             process: Constants.Profiles,
             action: Constants.Actions.GetBulkProfile,
@@ -120,7 +120,7 @@ export class SubspaceClient extends SubspaceClientReadOnly {
         const data = JSON.parse(res.Data);
         return new Profile(data, this.ao, this.signer);
     }
-    async getBulkProfile(userIds) {
+    async getBulkProfiles(userIds) {
         const res = await AO.read({
             process: Constants.Profiles,
             action: Constants.Actions.GetBulkProfile,

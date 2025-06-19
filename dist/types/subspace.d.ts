@@ -9,7 +9,7 @@ export declare class SubspaceClientReadOnly implements ISubspaceReadOnly {
     ao: AoClient;
     constructor(params: SubspaceConfigReadOnly);
     getProfile(userId: string): Promise<IProfileReadOnly | null>;
-    getBulkProfile(userIds: string[]): Promise<Array<IProfileReadOnly>>;
+    getBulkProfiles(userIds: string[]): Promise<Array<IProfileReadOnly>>;
     anchorToServer(anchorId: string): Promise<IServerReadOnly>;
     getServer(serverId: string): Promise<ServerReadOnly | null>;
     getOriginalId(userId: string): Promise<string>;
@@ -20,7 +20,7 @@ export declare class SubspaceClient extends SubspaceClientReadOnly implements IS
     private readonly signer;
     constructor(params: SubspaceConfig);
     getProfile(userId?: string): Promise<IProfile | null>;
-    getBulkProfile(userIds: string[]): Promise<Array<IProfile>>;
+    getBulkProfiles(userIds: string[]): Promise<Array<IProfile>>;
     anchorToServer(anchorId: string): Promise<Server>;
     getServer(serverId: string): Promise<Server | null>;
     createProfile(): Promise<IProfile>;

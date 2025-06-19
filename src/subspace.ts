@@ -2,8 +2,8 @@ import { addBotParams, createBotParams, createServerParams, removeBotParams, Sub
 import { IBotReadOnly, IProfile, IProfileReadOnly, IServerReadOnly, ISubspace, ISubspaceReadOnly } from "./types/subspace";
 import { AoClient, AoSigner } from "./types/ao";
 import { connect } from "@permaweb/aoconnect";
-import { AO } from "./utilts/ao";
-import { Constants } from "./utilts/constants";
+import { AO } from "./utils/ao";
+import { Constants } from "./utils/constants";
 import { Server, ServerReadOnly } from "./server";
 import { Profile } from "./profile";
 import { Bot } from "./bot";
@@ -36,7 +36,7 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
         return data
     }
 
-    async getBulkProfile(userIds: string[]): Promise<Array<IProfileReadOnly>> {
+    async getBulkProfiles(userIds: string[]): Promise<Array<IProfileReadOnly>> {
         const res = await AO.read({
             process: Constants.Profiles,
             action: Constants.Actions.GetBulkProfile,
@@ -149,7 +149,7 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
         return new Profile(data, this.ao, this.signer)
     }
 
-    async getBulkProfile(userIds: string[]): Promise<Array<IProfile>> {
+    async getBulkProfiles(userIds: string[]): Promise<Array<IProfile>> {
         const res = await AO.read({
             process: Constants.Profiles,
             action: Constants.Actions.GetBulkProfile,
