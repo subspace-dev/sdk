@@ -73,6 +73,7 @@ export const Constants = {
 
         // Bot actions
         CreateBot: 'Create-Bot',
+        AnchorToBot: 'Anchor-To-Bot',
         BotInfo: 'Bot-Info',
         AddBot: 'Add-Bot',
         ApproveAddBot: 'Approve-Add-Bot',

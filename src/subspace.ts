@@ -111,6 +111,18 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
         const data = JSON.parse(res.Data) as IBotReadOnly
         return data
     }
+
+    async anchorToBot(botAnchor: string): Promise<IBotReadOnly | null> {
+        const res = await AO.read({
+            process: Constants.Profiles,
+            action: Constants.Actions.AnchorToBot,
+            tags: { BotAnchor: botAnchor },
+            ao: this.ao
+        })
+
+        const data = JSON.parse(res.Data) as IBotReadOnly
+        return data
+    }
 }
 
 // ---------------- Subspace writable client ---------------- //
@@ -124,11 +136,12 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
         Object.assign(this, params)
     }
 
-    async getProfile(userId: string): Promise<IProfile | null> {
+    async getProfile(userId?: string): Promise<IProfile | null> {
+        const tags = userId ? { UserId: userId } : undefined
         const res = await AO.read({
             process: Constants.Profiles,
             action: Constants.Actions.GetProfile,
-            tags: { UserId: userId },
+            tags: tags,
             ao: this.ao
         })
 
@@ -198,11 +211,11 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
         })
 
         if (res.tags?.Status === "200" && res.id) {
-            // The profile is created for the sender (message ID represents sender)
-            const userId = res.id as string
+            // The profile is created for the sender (message sender's address)
             // Small delay to allow profile creation to complete
             await new Promise(resolve => setTimeout(resolve, 1000))
-            const profile = await this.getProfile(userId)
+            // Get the profile using the message sender (which is from the signer)
+            const profile = await this.getProfile() // when you dont pass a userId, it will use the signer's address
             if (profile) return profile
         }
         throw new Error('Failed to create profile')
@@ -239,6 +252,18 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
         return new Bot(data, this.ao, this.signer)
     }
 
+    async anchorToBot(botAnchor: string): Promise<Bot | null> {
+        const res = await AO.read({
+            process: Constants.Profiles,
+            action: Constants.Actions.AnchorToBot,
+            tags: { BotAnchor: botAnchor },
+            ao: this.ao
+        })
+
+        const data = JSON.parse(res.Data) as IBotReadOnly
+        return new Bot(data, this.ao, this.signer)
+    }
+
     async createBot(params: createBotParams): Promise<Bot> {
         const res = await AO.write({
             process: Constants.Profiles,
@@ -252,9 +277,14 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
             signer: this.signer
         })
 
-        if (res.tags?.Status === "200" && res.tags?.BotProcess) {
-            const bot = await this.getBot(res.tags.BotProcess)
-            if (bot) return bot
+        if (res.tags?.Status === "200" && res.tags?.BotAnchor) {
+            const botAnchor = res.tags.BotAnchor as string
+
+            if (botAnchor) {
+                const bot = await this.anchorToBot(botAnchor)
+                if (bot) return bot
+            }
+
         }
         throw new Error('Failed to create bot')
     }
@@ -276,7 +306,7 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
 
     async removeBot(params: removeBotParams): Promise<boolean> {
         const res = await AO.write({
-            process: Constants.Profiles,
+            process: params.serverId,
             action: Constants.Actions.RemoveBot,
             tags: {
                 BotProcess: params.botProcess

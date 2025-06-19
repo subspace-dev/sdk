@@ -1729,6 +1729,40 @@ Handlers.add("Create-Bot", function(msg)
     end
 end)
 
+Handlers.add("Anchor-To-Bot", function(msg)
+    local botAnchor = VarOrNil(msg.Tags.BotAnchor)
+
+    if ValidateCondition(not botAnchor, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotAnchor is required"
+            })
+        })
+    then
+        return
+    end
+
+    local bot = SQLRead("SELECT * FROM bots WHERE botAnchor = ?", botAnchor)[1]
+    if ValidateCondition(not bot, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Bot not found"
+            })
+        })
+    then
+        return
+    end
+
+    msg.reply({
+        Action = "Anchor-To-Bot-Response",
+        Status = "200",
+        BotProcess = bot.botProcess,
+        Data = json.encode(bot)
+    })
+end)
+
+
+
 Handlers.add("Bot-Info", function(msg)
     local botProcess = VarOrNil(msg.Tags.BotProcess)
 

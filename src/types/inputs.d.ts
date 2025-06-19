@@ -138,4 +138,5 @@ export type addBotParams = {
 
 export type removeBotParams = {
     botProcess: string
+    serverId: string
 }

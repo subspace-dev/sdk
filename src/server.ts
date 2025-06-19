@@ -133,12 +133,16 @@ export class Server extends ServerReadOnly implements IServer {
     }
 
     async createCategory(params: createCategoryParams): Promise<boolean> {
-        const tags: Record<string, string> = {
-            AllowMessaging: params.allowMessaging ? "1" : "0",
-            AllowAttachments: params.allowAttachments ? "1" : "0"
+        if (!params.name) {
+            throw new Error('Category name is required')
         }
 
-        if (params.name) tags.Name = params.name
+        const tags: Record<string, string> = {
+            Name: params.name,
+            AllowMessaging: (params.allowMessaging ?? true) ? "1" : "0",
+            AllowAttachments: (params.allowAttachments ?? true) ? "1" : "0"
+        }
+
         if (params.orderId !== undefined) tags.OrderId = params.orderId.toString()
 
         const res = await AO.write({
@@ -185,16 +189,23 @@ export class Server extends ServerReadOnly implements IServer {
     }
 
     async createChannel(params: createChannelParams): Promise<boolean> {
+        if (!params.name) {
+            throw new Error('Channel name is required')
+        }
+
+        const tags: Record<string, string> = {
+            Name: params.name,
+            AllowMessaging: (params.allowMessaging ?? true) ? "1" : "0",
+            AllowAttachments: (params.allowAttachments ?? true) ? "1" : "0"
+        }
+
+        if (params.categoryId) tags.CategoryId = params.categoryId
+        if (params.orderId !== undefined) tags.OrderId = params.orderId.toString()
+
         const res = await AO.write({
             process: this.serverId,
             action: Constants.Actions.CreateChannel,
-            tags: {
-                Name: params.name!,
-                AllowMessaging: params.allowMessaging ? "1" : "0",
-                AllowAttachments: params.allowAttachments ? "1" : "0",
-                CategoryId: params.categoryId || "",
-                OrderId: params.orderId?.toString() || ""
-            },
+            tags,
             ao: this.ao,
             signer: this.signer
         })
