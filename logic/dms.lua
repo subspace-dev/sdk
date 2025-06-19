@@ -4,7 +4,7 @@ json = require("json")
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Profiles = Profiles or Owner
+Subspace = Subspace or Owner
 DmOwner = DmOwner or ""
 
 db = db or sqlite3.open_memory()
@@ -91,7 +91,7 @@ db:exec([[
 ----------------------------------------------------------------------------
 
 Handlers.once("Init-Dms", function(msg)
-    assert(msg.From == Profiles, "❌[auth error] sender not authorized to initialize the dm module")
+    assert(msg.From == Subspace, "❌[auth error] sender not authorized to initialize the dm module")
     assert(DmOwner == "", "❌[auth error] Dm module already initialized")
     assert(msg.Tags.UserId, "❌[auth error] UserId in tags is required")
     assert(type(msg.Tags.UserId) == "string", "❌[auth error] UserId in tags must be a string")
@@ -165,7 +165,7 @@ end)
 
 -- msg forwarded by Profiles
 Handlers.add("Send-DM", function(msg)
-    assert(msg.From == Profiles, "❌[auth error] sender not authorized to add a dm")
+    assert(msg.From == Subspace, "❌[auth error] sender not authorized to add a dm")
     assert(DmOwner == "", "❌[auth error] Dm module not initialized")
 
     local authorId = msg["X-Origin"]
@@ -244,7 +244,7 @@ Handlers.add("Send-DM", function(msg)
     -- send notification
     if authorId ~= DmOwner then
         ao.send({
-            Target = Profiles,
+            Target = Subspace,
             Action = "Add-Notification",
             Tags = {
                 ServerOrDmId = ao.id,
@@ -266,7 +266,7 @@ Handlers.add("Send-DM", function(msg)
 end)
 
 Handlers.add("Delete-DM", function(msg)
-    assert(msg.From == Profiles, "❌[auth error] sender not authorized to delete a dm")
+    assert(msg.From == Subspace, "❌[auth error] sender not authorized to delete a dm")
     assert(DmOwner == "", "❌[auth error] Dm module not initialized")
 
     local messageId = VarOrNil(msg.Tags.MessageId)
@@ -340,7 +340,7 @@ end)
 
 
 Handlers.add("Edit-DM", function(msg)
-    assert(msg.From == Profiles, "❌[auth error] sender not authorized to edit a dm")
+    assert(msg.From == Subspace, "❌[auth error] sender not authorized to edit a dm")
     assert(DmOwner == "", "❌[auth error] Dm module not initialized")
 
     local messageId = VarOrNil(msg.Tags.MessageId)

@@ -89,6 +89,7 @@ db:exec([[
     CREATE TABLE IF NOT EXISTS servers (
         serverId TEXT PRIMARY KEY,
         anchorId TEXT NOT NULL,
+        publicServer INTEGER DEFAULT 1,
         userId TEXT NOT NULL
     );
 
@@ -117,6 +118,26 @@ db:exec([[
         userId TEXT NOT NULL,
         delegatedUserId TEXT NOT NULL,
         PRIMARY KEY (userId, delegatedUserId)
+    );
+
+    CREATE TABLE IF NOT EXISTS bots (
+        userId TEXT NOT NULL,
+        botAnchor TEXT NOT NULL,
+        botProcess TEXT PRIMARY KEY,
+        botName TEXT NOT NULL,
+        botPfp TEXT NOT NULL,
+        botPublic INTEGER DEFAULT 0,
+
+        FOREIGN KEY (userId) REFERENCES profiles(userId)
+    );
+
+    CREATE TABLE IF NOT EXISTS botServers (
+        botProcess TEXT NOT NULL,
+        serverId TEXT NOT NULL,
+        PRIMARY KEY (botProcess, serverId)
+
+        FOREIGN KEY (botProcess) REFERENCES bots(botProcess)
+        FOREIGN KEY (serverId) REFERENCES servers(serverId)
     );
 ]])
 
@@ -191,6 +212,11 @@ function ServerExists(serverId)
     return servers and #servers > 0
 end
 
+function ServerIsPublic(serverId)
+    local servers = SQLRead("SELECT * FROM servers WHERE serverId = ?", serverId)
+    return servers and #servers > 0 and servers[1].publicServer == 1
+end
+
 function UserInServer(userId, serverId)
     if not userId or not serverId then
         return false
@@ -198,6 +224,18 @@ function UserInServer(userId, serverId)
 
     local servers = SQLRead("SELECT * FROM serversJoined WHERE userId = ? AND serverId = ?", userId, serverId)
     return servers and #servers > 0
+end
+
+-- Helper function to resequence servers for a specific user
+function ResequenceUserServers(userId)
+    local servers = SQLRead("SELECT serverId FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", userId)
+
+    -- Resequence starting from 1
+    for i, server in ipairs(servers) do
+        SQLWrite("UPDATE serversJoined SET orderId = ? WHERE userId = ? AND serverId = ?", i, userId, server.serverId)
+    end
+
+    return #servers
 end
 
 ----------------------------------------------------------------------------
@@ -498,6 +536,35 @@ Handlers.add("Anchor-To-Server", function(msg)
     end
 end)
 
+Handlers.add("Update-Server", function(msg)
+    local serverId = msg.From
+    local publicServer = VarOrNil(msg.Tags.PublicServer)
+
+    if ValidateCondition(not ServerExists(serverId), msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Server not found"
+            })
+        })
+    then
+        return
+    end
+
+    if publicServer then publicServer = (publicServer == "true") end
+    if publicServer then
+        publicServer = 1
+    else
+        publicServer = 0
+    end
+
+    SQLWrite("UPDATE servers SET publicServer = ? WHERE serverId = ?", publicServer, serverId)
+
+    msg.reply({
+        Action = "Update-Server-Response",
+        Status = "200",
+    })
+end)
+
 Handlers.add("Join-Server", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -534,13 +601,36 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    SQLWrite("INSERT OR REPLACE INTO serversJoined (userId, serverId, orderId) VALUES (?, ?, ?)", userId, serverId, 0)
+    if ValidateCondition(not ServerIsPublic(serverId), msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Server is not public, ask the server admins to update the server settings"
+            })
+        })
+    then
+        return
+    end
+
+    -- Get the current max order for the user's servers and place new server at the end
+    local maxOrderResult = SQLRead("SELECT MAX(orderId) as maxOrder FROM serversJoined WHERE userId = ?", userId)[1]
+    local newOrderId = 1
+    if maxOrderResult and maxOrderResult.maxOrder then
+        newOrderId = maxOrderResult.maxOrder + 1
+    end
+
+    SQLWrite("INSERT OR REPLACE INTO serversJoined (userId, serverId, orderId) VALUES (?, ?, ?)", userId, serverId,
+        newOrderId)
+
+    -- Resequence to ensure clean ordering
+    ResequenceUserServers(userId)
+
     profile.serversJoined = SQLRead("SELECT * FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", userId)
 
+    -- Send message to server to add the user to the server
     ao.send({
         Action = "Join-Server",
         Tags = {
-            userId = userId
+            UserId = userId
         }
     })
 
@@ -588,13 +678,17 @@ Handlers.add("Leave-Server", function(msg)
     end
 
     SQLWrite("DELETE FROM serversJoined WHERE userId = ? AND serverId = ?", userId, serverId)
+
+    -- Resequence to ensure clean ordering after removal
+    ResequenceUserServers(userId)
+
     profile.serversJoined = SQLRead("SELECT * FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", userId)
 
     ao.send({
         Action = "Leave-Server",
         Target = serverId,
         Tags = {
-            userId = userId
+            UserId = userId
         }
     })
 
@@ -606,10 +700,150 @@ Handlers.add("Leave-Server", function(msg)
 end)
 
 Handlers.add("Update-Server-Order", function(msg)
+    local userId = msg.From
+    userId = GetOriginalId(userId)
+    local serverId = VarOrNil(msg.Tags.ServerId)
+    local orderId = VarOrNil(msg.Tags.OrderId)
 
+    if orderId then orderId = tonumber(orderId) end
+
+    local profile = GetProfile(userId)
+    if ValidateCondition(not profile, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Profile not found"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not serverId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "ServerId is required"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not orderId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "OrderId is required"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not ServerExists(serverId), msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Server not found"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not UserInServer(userId, serverId), msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not in server"
+            })
+        })
+    then
+        return
+    end
+
+    -- Get current server order info
+    local currentServerInfo = SQLRead("SELECT orderId FROM serversJoined WHERE userId = ? AND serverId = ?", userId,
+        serverId)[1]
+    if ValidateCondition(not currentServerInfo, msg, {
+            Status = "500",
+            Data = json.encode({
+                error = "Failed to get current server order"
+            })
+        })
+    then
+        return
+    end
+
+    local currentOrder = currentServerInfo.orderId
+
+    -- If no change in order, just return success
+    if orderId == currentOrder then
+        msg.reply({
+            Action = "Update-Server-Order-Response",
+            Status = "200",
+            Data = json.encode({
+                message = "Server order unchanged"
+            })
+        })
+        return
+    end
+
+    -- Begin transaction for atomic updates
+    db:exec("BEGIN TRANSACTION")
+    local success = true
+
+    -- Handle ordering changes
+    if orderId < currentOrder then
+        -- Moving up: shift other servers down
+        SQLWrite([[
+            UPDATE serversJoined
+            SET orderId = orderId + 1
+            WHERE userId = ? AND orderId >= ? AND orderId < ? AND serverId != ?
+        ]], userId, orderId, currentOrder, serverId)
+    else
+        -- Moving down: shift other servers up
+        SQLWrite([[
+            UPDATE serversJoined
+            SET orderId = orderId - 1
+            WHERE userId = ? AND orderId > ? AND orderId <= ? AND serverId != ?
+        ]], userId, currentOrder, orderId, serverId)
+    end
+
+    -- Update the server's order
+    local rows = SQLWrite([[
+        UPDATE serversJoined
+        SET orderId = ?
+        WHERE userId = ? AND serverId = ?
+    ]], orderId, userId, serverId)
+
+    if rows ~= 1 then
+        success = false
+    end
+
+    -- Resequence to ensure clean ordering
+    if success then
+        ResequenceUserServers(userId)
+    end
+
+    if success then
+        db:exec("COMMIT")
+        -- Get updated profile
+        local updatedProfile = GetProfile(userId)
+        msg.reply({
+            Action = "Update-Server-Order-Response",
+            Status = "200",
+            Data = json.encode(updatedProfile)
+        })
+    else
+        db:exec("ROLLBACK")
+        msg.reply({
+            Action = "Update-Server-Order-Response",
+            Status = "500",
+            Data = json.encode({
+                error = "Failed to update server order"
+            })
+        })
+    end
 end)
 
--- Message from server for when a user is Kicked or Banned
+-- Message from server for when a user is Kicked
 Handlers.add("Kick-Member", function(msg)
     local serverId = msg.From
     local initiatorUserId = msg["X-Origin"]
@@ -625,6 +859,7 @@ Handlers.add("Kick-Member", function(msg)
     })
 end)
 
+-- Message from server for when a user is Banned
 Handlers.add("Ban-Member", function(msg)
     local serverId = msg.From
     local initiatorUserId = msg["X-Origin"]
@@ -1390,6 +1625,277 @@ Handlers.add("Mark-All-Read", function(msg)
     })
 end)
 
-
-
 ----------------------------------------------------------------------------
+-- BOTS
+
+Handlers.add("Create-Bot", function(msg)
+    local userId = msg.From
+    userId = GetOriginalId(userId)
+    local botName = VarOrNil(msg.Tags.BotName)
+    local botPfp = VarOrNil(msg.Tags.BotPfp)
+    local publicBot = VarOrNil(msg.Tags.PublicBot)
+
+    if ValidateCondition(not botName, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotName is required"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not botPfp, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotPfp is required"
+            })
+        })
+    then
+        return
+    end
+
+    local profile = GetProfile(userId)
+    if ValidateCondition(not profile, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Profile not found"
+            })
+        })
+    then
+        return
+    end
+
+    -- pfp should be an arweave txid of length 43
+    if ValidateCondition(#botPfp ~= 43, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotPfp must be an arweave txid of length 43"
+            })
+        })
+    then
+        return
+    end
+
+    if publicBot then
+        publicBot = (publicBot == "true")
+    else
+        publicBot = true
+    end
+
+    local spawnRes = ao.spawn(ao.env.Module.Id, {
+        Tags = {
+            Authority = Authority,
+            ["On-Boot"] = BotSrc
+        }
+    })
+    local ref = tostring(tonumber(spawnRes.Anchor))
+
+    msg.reply({
+        Action = "Create-Bot-Response",
+        Status = "200",
+        BotAnchor = ref,
+        Data = json.encode({
+            message = "You will get the bot process from Anchor-To-Bot handler"
+        })
+    })
+
+    local spawnMsg = Receive({ Action = "Spawned", From = ao.id, Reference = ref })
+    local botProcess = spawnMsg.Tags.Process
+
+    ao.send({
+        Target = botProcess,
+        Action = "Init-Bot",
+        Tags = {
+            UserId = userId,
+            BotName = botName,
+            BotPfp = botPfp,
+            BotPublic = tostring(publicBot)
+        }
+    })
+
+    local initRes = Receive({ Action = "Init-Bot-Response", From = botProcess })
+    if initRes.Status == "200" then
+        if publicBot then
+            publicBot = 1
+        else
+            publicBot = 0
+        end
+
+        SQLWrite(
+            "INSERT INTO bots (userId, botAnchor, botProcess, botName, botPfp, botPublic) VALUES (?, ?, ?, ?, ?, ?)",
+            userId,
+            ref, botProcess, botName, botPfp, publicBot)
+    end
+end)
+
+Handlers.add("Bot-Info", function(msg)
+    local botProcess = VarOrNil(msg.Tags.BotProcess)
+
+    if ValidateCondition(not botProcess, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotProcess is required"
+            })
+        })
+    then
+        return
+    end
+
+    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    if ValidateCondition(not bot, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Bot not found"
+            })
+        })
+    then
+        return
+    end
+
+    -- fetch number of servers the bot is in
+    local totalServers = SQLRead("SELECT COUNT(*) FROM serversJoined WHERE botProcess = ?", botProcess)[1]
+    bot.totalServers = totalServers
+
+    msg.reply({
+        Action = "Bot-Info-Response",
+        Status = "200",
+        Data = json.encode(bot)
+    })
+end)
+
+Handlers.add("Add-Bot", function(msg)
+    local userId = msg.From
+    userId = GetOriginalId(userId)
+    local botProcess = VarOrNil(msg.Tags.BotProcess)
+    local serverId = VarOrNil(msg.Tags.ServerId)
+
+    if ValidateCondition(not botProcess, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotProcess is required"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not serverId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "ServerId is required"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not ServerExists(serverId), msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Server not found"
+            })
+        })
+    then
+        return
+    end
+
+    local profile = GetProfile(userId)
+    if ValidateCondition(not profile, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Profile not found"
+            })
+        })
+    then
+        return
+    end
+
+    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    if ValidateCondition(not bot, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Bot not found"
+            })
+        })
+    then
+        return
+    end
+
+    msg.forward(serverId)
+    msg.reply({
+        Action = "Add-Bot-Response",
+        Status = "200",
+        Data = json.encode({
+            message = "Bot add request sent to server"
+        })
+    })
+
+    local addResponse = Receive({ Action = "Add-Bot-Response", From = serverId })
+    if ValidateCondition(addResponse.Status ~= "200", msg, {
+            Status = "500",
+            Data = json.encode(addResponse.Data)
+        }) then
+        return
+    end
+
+    -- send message to bot to join server
+    ao.send({
+        Target = botProcess,
+        Action = "Join-Server",
+        Tags = { ServerId = serverId }
+    })
+    local joinResponse = Receive({ Action = "Join-Server-Response", From = botProcess })
+    if ValidateCondition(joinResponse.Status ~= "200", msg, {
+            Status = "500",
+            Data = json.encode(joinResponse.Data)
+        }) then
+        return
+    end
+
+    -- add bot to serversJoined table
+    SQLWrite("INSERT INTO botServers (botProcess, serverId) VALUES (?, ?)", botProcess, serverId)
+    ao.send({
+        Target = serverId,
+        Action = "Approve-Add-Bot",
+        Tags = {
+            BotProcess = botProcess
+        }
+    })
+    local approveResponse = Receive({ Action = "Approve-Add-Bot-Response", From = serverId })
+    if ValidateCondition(approveResponse.Status ~= "200", msg, {
+            Status = "500",
+            Data = json.encode(approveResponse.Data)
+        }) then
+        return
+    end
+
+    ao.send({
+        Target = botProcess,
+        Status = "200",
+        Action = "Join-Server-Success",
+    })
+end)
+
+Handlers.add("Remove-Bot", function(msg)
+    local serverId = msg.From
+    local botProcess = VarOrNil(msg.Tags.BotProcess)
+
+    if ValidateCondition(not botProcess, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotProcess is required"
+            })
+        })
+    then
+        return
+    end
+
+    -- remove bot from serversJoined table
+    SQLWrite("DELETE FROM botServers WHERE botProcess = ? AND serverId = ?", botProcess, serverId)
+
+    msg.reply({
+        Action = "Remove-Bot-Response",
+        Status = "200",
+    })
+end)

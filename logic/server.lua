@@ -4,7 +4,7 @@ json = require("json")
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Profiles = Profiles or Owner
+Subspace = Subspace or Owner
 ServerOwner = ServerOwner or ""
 Name = Name or ""
 Logo = Logo or ""
@@ -12,6 +12,11 @@ Balances = Balances or { [ao.id] = 1 }
 TotalSupply = TotalSupply or 1
 Denomination = Denomination or 1
 Ticker = Ticker or ""
+
+-- By default servers are public and anyone can join
+-- If private, new users cannot join
+-- Get requests can still be done and non members can still see and fetch messages
+PublicServer = PublicServer or true
 
 db = db or sqlite3.open_memory()
 
@@ -130,7 +135,14 @@ db:exec([[
         messageId INTEGER,
         FOREIGN KEY (messageId) REFERENCES messages(messageId)
     );
+
+    CREATE TABLE IF NOT EXISTS bots (
+        botProcess TEXT PRIMARY KEY,
+        botApproved INTEGER NOT NULL DEFAULT 0
+    );
 ]])
+
+SubscribedBots = {}
 
 Permissions = {
     SEND_MESSAGES = 1 << 0,    -- 1
@@ -145,6 +157,7 @@ Permissions = {
     MENTION_EVERYONE = 1 << 9, -- 512
     ADMINISTRATOR = 1 << 10,   -- 1024
     ATTACHMENTS = 1 << 11,     -- 2048
+    MANAGE_BOTS = 1 << 12,     -- 4096
 }
 
 ----------------------------------------------------------------------------
@@ -369,7 +382,7 @@ end
 ----------------------------------------------------------------------------
 
 Handlers.once("Init-Server", function(msg)
-    assert(msg.From == Profiles, "❌[Init-Server] Invalid authority")
+    assert(msg.From == Subspace, "❌[Init-Server] Invalid authority")
     assert(ServerOwner == "", "❌[Init-Server] Server already initialized")
     assert(msg.Tags.UserId, "❌[Init-Server] UserId in tags is required")
     assert(type(msg.Tags.UserId) == "string", "❌[Init-Server] UserId in tags must be a string")
@@ -397,7 +410,7 @@ Handlers.once("Init-Server", function(msg)
 end)
 
 Handlers.add("Update-Server-Src", function(msg)
-    assert(((msg.From == Profiles) or (msg.From == ServerOwner)), "❌[Update-Server-Src] Invalid authority")
+    assert(((msg.From == Subspace) or (msg.From == ServerOwner)), "❌[Update-Server-Src] Invalid authority")
     assert(ServerOwner == "", "❌[Update-Server-Src] Server not initialized")
 
     local srcTxId = msg.Data
@@ -422,14 +435,14 @@ Handlers.add("Info", function(msg)
     -- local memberRoles = SQLRead("SELECT * FROM memberRoles")
 
     -- Validate role permissions and fix any invalid ones
-    for _, role in ipairs(roles) do
-        if not PermissionIsValid(role.permissions) then
-            -- Log the issue and fix it
-            print("Warning: Role '" .. role.name .. "' has invalid permissions: " .. tostring(role.permissions))
-            role.permissions = Permissions.SEND_MESSAGES
-            SQLWrite("UPDATE roles SET permissions = ? WHERE roleId = ?", role.permissions, role.roleId)
-        end
-    end
+    -- for _, role in ipairs(roles) do
+    --     if not PermissionIsValid(role.permissions) then
+    --         -- Log the issue and fix it
+    --         print("Warning: Role '" .. role.name .. "' has invalid permissions: " .. tostring(role.permissions))
+    --         role.permissions = Permissions.SEND_MESSAGES
+    --         SQLWrite("UPDATE roles SET permissions = ? WHERE roleId = ?", role.permissions, role.roleId)
+    --     end
+    -- end
 
     -- local membersArranged = {}
     -- for _, member in ipairs(members) do
@@ -448,14 +461,13 @@ Handlers.add("Info", function(msg)
         Name = Name,
         Logo = Logo,
         Owner = ServerOwner,
-        -- IGNORE
-        Denomination = tostring(Denomination),
-        Ticker = Ticker,
-        -- /IGNORE
         Categories = json.encode(categories),
         Channels = json.encode(channels),
         Roles = json.encode(roles),
-        -- Members = json.encode(membersArranged)
+        PublicServer = PublicServer,
+        -- IGNORE REST
+        Denomination = tostring(Denomination),
+        Ticker = Ticker,
     })
 end)
 
@@ -493,7 +505,7 @@ end)
 
 Handlers.add("Join-Server", function(msg)
     -- this will always be sent from the profiles process
-    assert(msg.From == Profiles, "❌[Join-Server] Invalid authority")
+    assert(msg.From == Subspace, "❌[Join-Server] Invalid authority")
     local userId = VarOrNil(msg.Tags.UserId)
     assert(userId, "❌[Join-Server] UserId is required")
 
@@ -517,7 +529,7 @@ end)
 
 Handlers.add("Leave-Server", function(msg)
     -- this will always be sent from the profiles process
-    assert(msg.From == Profiles, "❌[Leave-Server] Invalid authority")
+    assert(msg.From == Subspace, "❌[Leave-Server] Invalid authority")
     local userId = VarOrNil(msg.Tags.UserId)
     assert(userId, "❌[Leave-Server] UserId is required")
 
@@ -541,6 +553,7 @@ Handlers.add("Update-Server", function(msg)
     local userId = msg.From
     local name = VarOrNil(msg.Tags.Name)
     local logo = VarOrNil(msg.Tags.Logo)
+    local publicServer = VarOrNil(msg.Tags.PublicServer)
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_SERVER)
     if ValidateCondition(not hasPermission, msg, {
@@ -557,6 +570,16 @@ Handlers.add("Update-Server", function(msg)
     end
     if logo then
         Logo = logo
+    end
+
+    if publicServer then
+        PublicServer = publicServer == "true"
+        ao.send({
+            Action = "Update-Server",
+            Tags = {
+                PublicServer = tostring(PublicServer)
+            }
+        })
     end
 
     msg.reply({
@@ -1590,7 +1613,7 @@ Handlers.add("Kick-Member", function(msg)
     if success then
         db:exec("COMMIT")
 
-        msg.forward(Profiles)
+        msg.forward(Subspace)
 
         msg.reply({
             Action = "Kick-Member-Response",
@@ -1658,7 +1681,7 @@ Handlers.add("Ban-Member", function(msg)
         if success then
             db:exec("COMMIT")
 
-            msg.forward(Profiles)
+            msg.forward(Subspace)
 
             msg.reply({
                 Action = "Ban-Member-Response",
@@ -2008,7 +2031,7 @@ Handlers.add("Send-Message", function(msg)
         local mentionedMember = GetMember(mentionedUserId)
         if mentionedMember then
             ao.send({
-                Target = Profiles,
+                Target = Subspace,
                 Action = "Add-Notification",
                 Tags = {
                     ServerOrDmId = ao.id,
@@ -2471,3 +2494,170 @@ function CanUserManageUserRoles(managerId, targetUserId)
 end
 
 ----------------------------------------------------------------------------
+-- BOTS
+
+Handlers.add("Add-Bot", function(msg)
+    assert(msg.From == Subspace, "You are not allowed to add bots")
+
+    local userId = msg["X-Origin"]
+
+    local botProcess = VarOrNil(msg.Tags.BotProcess)
+    local serverId = VarOrNil(msg.Tags.ServerId)
+
+    if ValidateCondition(not botProcess, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "BotProcess is required"
+            })
+        }) then
+        return
+    end
+
+    if ValidateCondition(not serverId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "ServerId is required"
+            })
+        }) then
+        return
+    end
+
+    -- member exists and has permissions to add bots
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User is not a member of this server"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_BOTS)
+    if ValidateCondition(not hasPermission, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User does not have permission to add bots"
+            })
+        }) then
+        return
+    end
+
+    -- check if bot already exists
+    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ? AND botApproved = 0", botProcess)[1]
+    if ValidateCondition(bot, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Bot already exists in server"
+            })
+        }) then
+        return
+    end
+
+    -- add bot to server
+    local rows = SQLWrite("INSERT INTO bots (botProcess) VALUES (?)", botProcess)
+    if ValidateCondition(rows ~= 1, msg, {
+            Status = "500",
+            Data = json.encode({
+                error = "Failed to add bot"
+            })
+        }) then
+        return
+    end
+
+    msg.reply({
+        Action = "Add-Bot-Response",
+        Status = "200",
+    })
+end)
+
+Handlers.add("Approve-Add-Bot", function(msg)
+    assert(msg.From == Subspace, "You are not allowed to approve bots")
+
+    local botProcess = VarOrNil(msg.Tags.BotProcess)
+
+    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    if ValidateCondition(not bot, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Bot not found"
+            })
+        }) then
+        return
+    end
+
+    SQLWrite("UPDATE bots SET botApproved = 1 WHERE botProcess = ?", botProcess)
+
+    msg.reply({
+        Action = "Approve-Add-Bot-Response",
+        Status = "200",
+    })
+end)
+
+Handlers.add("Subscribe", function(msg)
+    local botProcess = msg.From
+
+    -- verify if bot is approved
+    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ? AND botApproved = 1", botProcess)[1]
+    if ValidateCondition(not bot, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Bot is either not approved or doesnot exist in the server"
+            })
+        }) then
+        return
+    end
+
+    -- add bot to subsriptions list
+    SubscribedBots[botProcess] = true
+
+    msg.reply({
+        Action = "Subscribe-Response",
+        Status = "200",
+    })
+end)
+
+Handlers.add("Remove-Bot", function(msg)
+    local userId = msg.From
+
+    local botProcess = VarOrNil(msg.Tags.BotProcess)
+
+    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    if ValidateCondition(not bot, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Bot not found"
+            })
+        }) then
+        return
+    end
+
+    -- remove bot from server
+    local rows = SQLWrite("DELETE FROM bots WHERE botProcess = ?", botProcess)
+    if ValidateCondition(rows ~= 1, msg, {
+            Status = "500",
+            Data = json.encode({
+                error = "Failed to remove bot"
+            })
+        }) then
+        return
+    end
+
+    -- tell subspace and bot process that bot has been removed
+    ao.send({
+        Target = botProcess,
+        Action = "Remove-Bot",
+    })
+    ao.send({
+        Target = Subspace,
+        Action = "Remove-Bot",
+        Tags = {
+            BotProcess = botProcess
+        }
+    })
+
+    msg.reply({
+        Action = "Remove-Bot-Response",
+        Status = "200",
+    })
+end)
