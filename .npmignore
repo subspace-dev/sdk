@@ -1,0 +1,55 @@
+# Source files
+src/
+*.ts
+!*.d.ts
+
+# Build configs
+tsconfig*.json
+
+# Development files
+.gitignore
+.git/
+.vscode/
+.idea/
+
+# Test files
+test/
+tests/
+*.test.*
+*.spec.*
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Build artifacts (keep only dist/)
+build/
+
+# Dependencies lock files (controversial - you might want to include these)
+package-lock.json
+yarn.lock
+
+# Environment files
+.env
+.env.*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db 

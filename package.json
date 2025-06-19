@@ -1,26 +1,75 @@
 {
   "name": "@subspace-chat/sdk",
-  "description": "SDK for Subspace Communicator",
-  "version": "0.0.1",
-  "main": "index.js",
+  "version": "1.0.0",
+  "description": "A TypeScript client for the Subspace decentralized chat platform on AO",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./profile": {
+      "import": "./dist/esm/profile.js",
+      "require": "./dist/cjs/profile.js",
+      "types": "./dist/types/profile.d.ts"
+    },
+    "./server": {
+      "import": "./dist/esm/server.js",
+      "require": "./dist/cjs/server.js",
+      "types": "./dist/types/server.d.ts"
+    },
+    "./bot": {
+      "import": "./dist/esm/bot.js",
+      "require": "./dist/cjs/bot.js",
+      "types": "./dist/types/bot.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsc"
+    "build": "npm run clean && npm run build:esm && npm run build:cjs && npm run postbuild",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:watch": "tsc -p tsconfig.esm.json --watch",
+    "clean": "rm -rf dist",
+    "postbuild": "node scripts/postbuild.js",
+    "prepublishOnly": "npm run build",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
-    "Subspace",
-    "Chat",
-    "Arweave",
-    "AO",
-    "SDK"
+    "arweave",
+    "ao",
+    "chat",
+    "decentralized",
+    "messaging",
+    "subspace",
+    "typescript"
   ],
-  "author": "ankushKun_",
+  "author": "Ankush Singh <ankush4singh@gmail.com>",
   "license": "MIT",
-  "dependencies": {
-    "@dha-team/arbundles": "^1.0.3",
-    "@permaweb/aoconnect": "^0.0.85",
-    "arweave": "^1.15.7"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ankushKun/subspace-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ankushKun/subspace-sdk/issues"
+  },
+  "homepage": "https://github.com/ankushKun/subspace-lib#readme",
+  "peerDependencies": {
+    "@permaweb/aoconnect": "^0.0.50"
   },
   "devDependencies": {
-    "@types/node": "^24.0.1"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

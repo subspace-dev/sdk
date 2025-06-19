@@ -13,8 +13,13 @@ export class Bot implements IBotReadOnly {
     totalServers?: number
 
     constructor(data: IBotReadOnly, ao: AoClient, signer?: AoSigner) {
-        Object.assign(this, data)
         this.ao = ao
         this.signer = signer
+        this.botProcess = data.botProcess
+        this.botName = data.botName
+        this.botPfp = data.botPfp
+        this.botPublic = data.botPublic
+        this.userId = data.userId
+        this.totalServers = data.totalServers
     }
 }

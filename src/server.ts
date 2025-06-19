@@ -18,8 +18,14 @@ export class ServerReadOnly implements IServerReadOnly {
     roles: IRoleReadOnly[]
 
     constructor(data: IServerReadOnly, ao: AoClient) {
-        Object.assign(this, data)
         this.ao = ao
+        this.serverId = data.serverId
+        this.ownerId = data.ownerId
+        this.name = data.name
+        this.logo = data.logo
+        this.channels = data.channels
+        this.categories = data.categories
+        this.roles = data.roles
     }
 
     async getMember(userId: string): Promise<IMemberReadOnly> {
@@ -406,7 +412,10 @@ class Member implements IMember {
     roles: string[]
 
     constructor(data: IMemberReadOnly) {
-        Object.assign(this, data)
+        this.userId = data.userId
+        this.serverId = data.serverId
+        this.nickname = data.nickname
+        this.roles = data.roles
     }
 }
 
@@ -422,7 +431,13 @@ class Channel implements IChannel {
     allowAttachments?: 1 | 0
 
     constructor(data: IChannelReadOnly) {
-        Object.assign(this, data)
+        this.channelId = data.channelId
+        this.name = data.name
+        this.serverId = data.serverId
+        this.categoryId = data.categoryId
+        this.orderId = data.orderId
+        this.allowMessaging = data.allowMessaging
+        this.allowAttachments = data.allowAttachments
     }
 }
 
@@ -437,7 +452,12 @@ class Category implements ICategory {
     allowAttachments?: 1 | 0
 
     constructor(data: ICategoryReadOnly) {
-        Object.assign(this, data)
+        this.serverId = data.serverId
+        this.categoryId = data.categoryId
+        this.name = data.name
+        this.orderId = data.orderId
+        this.allowMessaging = data.allowMessaging
+        this.allowAttachments = data.allowAttachments
     }
 }
 
@@ -452,6 +472,11 @@ class Role implements IRole {
     permissions: any
 
     constructor(data: IRoleReadOnly) {
-        Object.assign(this, data)
+        this.id = data.id
+        this.name = data.name
+        this.serverId = data.serverId
+        this.color = data.color
+        this.position = data.position
+        this.permissions = data.permissions
     }
 }
