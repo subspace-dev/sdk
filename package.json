@@ -1,6 +1,6 @@
 {
-  "name": "@subspace-chat/sdk",
-  "version": "0.0.1",
+  "name": "@subspace-protocol/sdk",
+  "version": "0.0.2",
   "description": "A TypeScript client for the Subspace decentralized chat platform on AO",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
@@ -41,7 +41,8 @@
     "postbuild": "node scripts/postbuild.js",
     "prepublishOnly": "npm run build",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "publish-npm": "npm run build && npm publish --access public"
   },
   "keywords": [
     "arweave",
@@ -52,16 +53,16 @@
     "subspace",
     "typescript"
   ],
-  "author": "Ankush Singh <ankush4singh@gmail.com>",
+  "author": "Ankush Singh <ankush@arweave.org>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ankushKun/subspace-sdk.git"
+    "url": "https://github.com/subspace-dev/sdk.git"
   },
   "bugs": {
-    "url": "https://github.com/ankushKun/subspace-sdk/issues"
+    "url": "https://github.com/subspace-dev/sdk/issues"
   },
-  "homepage": "https://github.com/ankushKun/subspace-lib#readme",
+  "homepage": "https://github.com/subspace-dev/sdk#readme",
   "peerDependencies": {
     "@permaweb/aoconnect": "^0.0.50"
   },

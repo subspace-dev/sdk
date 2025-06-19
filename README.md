@@ -1,6 +1,6 @@
 # Subspace SDK
 
-A TypeScript client library for the **Subspace** decentralized chat platform built on [AO (Arweave Operating System)](https://ao.arweave.dev/). Subspace provides a Discord-like experience with servers, channels, direct messaging, bots, and more - all running on a decentralized, permanent infrastructure.
+A TypeScript client library for the **Subspace** decentralized chat platform built on [AO](https://ao.arweave.dev/). Subspace provides a Discord-like experience with servers, channels, direct messaging, bots, and more - all running on a decentralized, permanent infrastructure.
 
 ## Installation
 
