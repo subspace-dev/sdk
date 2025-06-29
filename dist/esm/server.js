@@ -1,4 +1,3 @@
-import { AO } from "./utils/ao";
 import { Constants } from "./utils/constants";
 // ---------------- Server implementation ---------------- //
 export class ServerReadOnly {
@@ -21,44 +20,38 @@ export class ServerReadOnly {
         this.roles = data.roles;
     }
     async getMember(userId) {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: this.serverId,
             action: Constants.Actions.GetMember,
             tags: { UserId: userId },
-            ao: this.ao
         });
         return JSON.parse(res.Data);
     }
     async getAllMembers() {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: this.serverId,
             action: Constants.Actions.GetAllMembers,
-            ao: this.ao
         });
         return JSON.parse(res.Data);
     }
 }
 export class Server extends ServerReadOnly {
-    signer;
-    constructor(data, ao, signer) {
+    constructor(data, ao) {
         super(data, ao);
-        this.signer = signer;
         Object.assign(this, data);
     }
     async getMember(userId) {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: this.serverId,
             action: Constants.Actions.GetMember,
             tags: { UserId: userId },
-            ao: this.ao
         });
         return JSON.parse(res.Data);
     }
     async getAllMembers() {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: this.serverId,
             action: Constants.Actions.GetAllMembers,
-            ao: this.ao
         });
         return JSON.parse(res.Data);
     }
@@ -68,12 +61,10 @@ export class Server extends ServerReadOnly {
             tags.TargetUserId = params.targetUserId;
         if (params.nickname)
             tags.Nickname = params.nickname;
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.UpdateMember,
             tags,
-            ao: this.ao,
-            signer: this.signer
         });
         if (res.tags?.Status === "200") {
             const targetUserId = params.targetUserId;
@@ -84,32 +75,26 @@ export class Server extends ServerReadOnly {
         throw new Error('Failed to update member');
     }
     async kickMember(userId) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.KickMember,
             tags: { TargetUserId: userId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async banMember(userId) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.BanMember,
             tags: { TargetUserId: userId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async unbanMember(userId) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.UnbanMember,
             tags: { TargetUserId: userId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
@@ -124,12 +109,10 @@ export class Server extends ServerReadOnly {
         };
         if (params.orderId !== undefined)
             tags.OrderId = params.orderId.toString();
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.CreateCategory,
             tags,
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
@@ -145,22 +128,18 @@ export class Server extends ServerReadOnly {
             tags.AllowAttachments = params.allowAttachments ? "1" : "0";
         if (params.orderId !== undefined)
             tags.OrderId = params.orderId.toString();
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.UpdateCategory,
             tags,
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async deleteCategory(categoryId) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.DeleteCategory,
             tags: { CategoryId: categoryId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
@@ -177,17 +156,15 @@ export class Server extends ServerReadOnly {
             tags.CategoryId = params.categoryId;
         if (params.orderId !== undefined)
             tags.OrderId = params.orderId.toString();
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.CreateChannel,
             tags,
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async updateChannel(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.UpdateChannel,
             tags: {
@@ -198,23 +175,19 @@ export class Server extends ServerReadOnly {
                 CategoryId: params.categoryId || "",
                 OrderId: params.orderId?.toString() || ""
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async deleteChannel(channelId) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.DeleteChannel,
             tags: { ChannelId: channelId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async createRole(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.CreateRole,
             tags: {
@@ -223,13 +196,11 @@ export class Server extends ServerReadOnly {
                 Permissions: params.permissions?.toString() || "",
                 OrderId: params.orderId?.toString() || ""
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async updateRole(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.UpdateRole,
             tags: {
@@ -239,49 +210,41 @@ export class Server extends ServerReadOnly {
                 Permissions: params.permissions?.toString() || "",
                 OrderId: params.orderId?.toString() || ""
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async deleteRole(roleId) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.DeleteRole,
             tags: { RoleId: roleId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async assignRole(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.AssignRole,
             tags: {
                 TargetUserId: params.targetUserId,
                 RoleId: params.roleId
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async unassignRole(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.UnassignRole,
             tags: {
                 TargetUserId: params.targetUserId,
                 RoleId: params.roleId
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async sendMessage(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.SendMessage,
             data: params.content,
@@ -290,45 +253,38 @@ export class Server extends ServerReadOnly {
                 ReplyTo: params.replyTo || "",
                 Attachments: JSON.stringify(params.attachments || [])
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async editMessage(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.EditMessage,
             data: params.content,
             tags: {
                 MessageId: params.messageId
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async deleteMessage(messageId) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: this.serverId,
             action: Constants.Actions.DeleteMessage,
             tags: { MessageId: messageId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async getSingleMessage(messageId) {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: this.serverId,
             action: Constants.Actions.GetSingleMessage,
             tags: { MessageId: messageId },
-            ao: this.ao
         });
         return JSON.parse(res.Data);
     }
     async getMessages(params) {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: this.serverId,
             action: Constants.Actions.GetMessages,
             tags: {
@@ -337,7 +293,6 @@ export class Server extends ServerReadOnly {
                 After: params.after || "",
                 Before: params.before || ""
             },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
         return {

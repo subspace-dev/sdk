@@ -1,5 +1,14 @@
 import { SubspaceClient, SubspaceClientReadOnly } from './subspace';
 export class Subspace {
+    // constructor(params?: SubspaceConfigReadOnly | SubspaceConfig) {
+    //     if (!params) {
+    //         return new SubspaceClientReadOnly({});
+    //     }
+    //     if ('signer' in params) {
+    //         return new SubspaceClient(params);
+    //     }
+    //     return new SubspaceClientReadOnly(params);
+    // }
     static init(params) {
         if (!params) {
             return new SubspaceClientReadOnly({});

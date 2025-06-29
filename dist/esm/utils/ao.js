@@ -1,10 +1,23 @@
 import { connect } from "@permaweb/aoconnect";
 export class AO {
-    static ao;
-    constructor() {
-        AO.ao = connect({ MODE: "legacy" });
+    CU_URL;
+    GATEWAY_URL;
+    ao;
+    signer;
+    writable;
+    constructor(params = {}) {
+        const cuUrl = params?.CU_URL || this.CU_URL;
+        const gatewayUrl = params?.GATEWAY_URL || this.GATEWAY_URL;
+        this.ao = connect({ MODE: "legacy", CU_URL: cuUrl, GATEWAY_URL: gatewayUrl });
+        this.signer = params.signer;
+        if (this.signer) {
+            this.writable = true;
+        }
+        else {
+            this.writable = false;
+        }
     }
-    static async read(params) {
+    async read(params) {
         const dryrunInput = {
             process: params.process,
         };
@@ -32,7 +45,7 @@ export class AO {
         let result = undefined;
         while (attempts < params.retries) {
             try {
-                result = await AO.ao.dryrun(dryrunInput);
+                result = await this.ao.dryrun(dryrunInput);
                 break;
             }
             catch (e) {
@@ -78,26 +91,27 @@ export class AO {
         }
         return response;
     }
-    static async write(params) {
-        const dryrunInput = {
+    async write(params) {
+        const writeInput = {
             process: params.process,
+            signer: params.signer
         };
         if (params.data) {
-            dryrunInput['data'] = params.data;
+            writeInput['data'] = params.data;
         }
         if (params.tags) {
             if (params.action) {
                 params.tags['Action'] = params.action;
             }
-            dryrunInput['tags'] = Object.entries(params.tags).map(([key, value]) => ({ name: key, value: value.toString() }));
+            writeInput['tags'] = Object.entries(params.tags).map(([key, value]) => ({ name: key, value: value.toString() }));
         }
         else {
             if (params.action) {
-                dryrunInput['tags'] = [{ name: 'Action', value: params.action }];
+                writeInput['tags'] = [{ name: 'Action', value: params.action }];
             }
         }
         if (params.signer) {
-            dryrunInput['signer'] = params.signer;
+            writeInput['signer'] = params.signer;
         }
         if (!params.retries)
             params.retries = 3;
@@ -105,7 +119,7 @@ export class AO {
         let messageId = undefined;
         while (attempts < params.retries) {
             try {
-                messageId = await AO.ao.message(dryrunInput);
+                messageId = await this.ao.message(writeInput);
                 break;
             }
             catch (e) {
@@ -123,7 +137,7 @@ export class AO {
         let result = undefined;
         while (attempts < params.retries) {
             try {
-                result = await AO.ao.result({ process: params.process, message: messageId });
+                result = await this.ao.result({ process: params.process, message: messageId });
                 break;
             }
             catch (e) {

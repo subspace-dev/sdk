@@ -1,26 +1,22 @@
-import { AO } from "./utils/ao";
 import { Constants } from "./utils/constants";
 // ---------------- Profile implementation ---------------- //
 export class Profile {
     ao;
-    signer;
     userId;
     pfp;
     dmProcess;
     delegations;
     serversJoined;
     friends;
-    constructor(data, ao, signer) {
+    constructor(data, ao) {
         Object.assign(this, data);
         this.ao = ao;
-        this.signer = signer;
     }
     async getNotifications() {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetNotifications,
             tags: { UserId: this.userId },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
         return data;
@@ -29,12 +25,10 @@ export class Profile {
         const tags = {};
         if (params.Pfp)
             tags.Pfp = params.Pfp;
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.UpdateProfile,
             tags,
-            ao: this.ao,
-            signer: this.signer
         });
         if (res.tags?.Status === "200" && res.data) {
             const updatedProfile = res.data;
@@ -43,29 +37,23 @@ export class Profile {
         return this;
     }
     async addDelegation() {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.AddDelegation,
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async removeDelegation() {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.RemoveDelegation,
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async removeAllDelegations() {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.RemoveAllDelegations,
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
@@ -73,7 +61,7 @@ export class Profile {
         if (!this.dmProcess) {
             throw new Error('User does not have a DM process');
         }
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: this.dmProcess,
             action: Constants.Actions.GetDMs,
             tags: {
@@ -83,7 +71,6 @@ export class Profile {
                 Before: params.before?.toString() || "",
                 EventId: params.eventId?.toString() || ""
             },
-            ao: this.ao
         });
         return JSON.parse(res.Data);
     }
@@ -95,80 +82,66 @@ export class Profile {
         if (params.replyTo) {
             tags.ReplyTo = params.replyTo;
         }
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.SendDM,
             data: params.content,
             tags,
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async deleteDM(params) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.DeleteDM,
             tags: {
                 FriendId: params.friendId,
                 MessageId: params.messageId
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async editDM(params) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.EditDM,
             data: params.content,
             tags: {
                 FriendId: params.friendId,
                 MessageId: params.messageId
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async sendFriendRequest(userId) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.SendFriendRequest,
             tags: { FriendId: userId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async acceptFriendRequest(userId) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.AcceptFriendRequest,
             tags: { FriendId: userId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async rejectFriendRequest(userId) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.RejectFriendRequest,
             tags: { FriendId: userId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async removeFriend(userId) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.RemoveFriend,
             tags: { FriendId: userId },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }

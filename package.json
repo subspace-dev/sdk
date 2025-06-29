@@ -49,7 +49,7 @@
   },
   "homepage": "https://github.com/subspace-dev/sdk#readme",
   "peerDependencies": {
-    "@permaweb/aoconnect": "^0.0.50"
+    "@permaweb/aoconnect": "^0.0.85"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

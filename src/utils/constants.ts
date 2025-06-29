@@ -1,5 +1,5 @@
 export const Constants = {
-    Profiles: '5YVh2IUvb8FJ-z9-kFFRDnnecam6oa0yy0W2NW1VpmI',
+    Subspace: 'ZrIAe6d6waj7ClOtDgOVH5XFSruDL8u3yCG6lrKYS68',
 
     Actions: {
         // Profile actions

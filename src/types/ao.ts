@@ -25,7 +25,7 @@ export type AoSigner = (args: {
     tags?: Tag[];
     target?: string;
     anchor?: string;
-}) => Promise<{ id: string; raw: ArrayBuffer }>;
+}) => Promise<{ id: string; raw: ArrayBuffer } | null>;
 
 // ------------- AO input types -------------
 

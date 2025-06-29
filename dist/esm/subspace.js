@@ -1,4 +1,3 @@
-import { connect } from "@permaweb/aoconnect";
 import { AO } from "./utils/ao";
 import { Constants } from "./utils/constants";
 import { Server, ServerReadOnly } from "./server";
@@ -10,39 +9,36 @@ export class SubspaceClientReadOnly {
     GATEWAY_URL = "https://arnode.asia";
     ao;
     constructor(params) {
-        Object.assign(this, params);
-        this.ao = connect({
-            MODE: "legacy",
+        this.CU_URL = params.CU_URL || this.CU_URL;
+        this.GATEWAY_URL = params.GATEWAY_URL || this.GATEWAY_URL;
+        this.ao = new AO({
             CU_URL: this.CU_URL,
-            GATEWAY_URL: this.GATEWAY_URL
+            GATEWAY_URL: this.GATEWAY_URL,
         });
     }
     async getProfile(userId) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetProfile,
-            tags: { UserId: userId },
-            ao: this.ao
+            tags: { UserId: userId }
         });
         const data = JSON.parse(res.Data);
         return data;
     }
     async getBulkProfiles(userIds) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetBulkProfile,
             tags: { UserIds: JSON.stringify(userIds) },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
         return data;
     }
     async anchorToServer(anchorId) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToServer,
             tags: { AnchorId: anchorId },
-            ao: this.ao
         });
         const serverId = res['ServerId'];
         if (!serverId) {
@@ -55,10 +51,9 @@ export class SubspaceClientReadOnly {
         return server;
     }
     async getServer(serverId) {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: serverId,
             action: Constants.Actions.Info,
-            ao: this.ao
         });
         const server = {
             serverId: serverId,
@@ -72,30 +67,27 @@ export class SubspaceClientReadOnly {
         return new ServerReadOnly(server, this.ao);
     }
     async getOriginalId(userId) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetOriginalId,
             tags: { UserId: userId },
-            ao: this.ao
         });
         return res['OriginalId'];
     }
     async getBot(botProcess) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.BotInfo,
             tags: { BotProcess: botProcess },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
         return data;
     }
     async anchorToBot(botAnchor) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToBot,
             tags: { BotAnchor: botAnchor },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
         return data;
@@ -103,39 +95,44 @@ export class SubspaceClientReadOnly {
 }
 // ---------------- Subspace writable client ---------------- //
 export class SubspaceClient extends SubspaceClientReadOnly {
-    signer;
     constructor(params) {
         super(params);
-        this.signer = params.signer;
         Object.assign(this, params);
+        if (params.signer) {
+            this.ao = new AO({
+                CU_URL: this.CU_URL,
+                GATEWAY_URL: this.GATEWAY_URL,
+                signer: params.signer
+            });
+        }
+        else {
+            throw new Error('Signer is required');
+        }
     }
     async getProfile(userId) {
         const tags = userId ? { UserId: userId } : undefined;
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetProfile,
             tags: tags,
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
-        return new Profile(data, this.ao, this.signer);
+        return new Profile(data, this.ao);
     }
     async getBulkProfiles(userIds) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetBulkProfile,
             tags: { UserIds: JSON.stringify(userIds) },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
-        return data.map(profile => new Profile(profile, this.ao, this.signer));
+        return data.map(profile => new Profile(profile, this.ao));
     }
     async anchorToServer(anchorId) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToServer,
             tags: { AnchorId: anchorId },
-            ao: this.ao
         });
         const serverId = res['ServerId'];
         if (!serverId) {
@@ -148,10 +145,9 @@ export class SubspaceClient extends SubspaceClientReadOnly {
         return server;
     }
     async getServer(serverId) {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: serverId,
             action: Constants.Actions.Info,
-            ao: this.ao
         });
         const server = {
             serverId: serverId,
@@ -162,14 +158,12 @@ export class SubspaceClient extends SubspaceClientReadOnly {
             channels: 'Channels' in res ? JSON.parse(res['Channels']) : [],
             roles: 'Roles' in res ? JSON.parse(res['Roles']) : [],
         };
-        return new Server(server, this.ao, this.signer);
+        return new Server(server, this.ao);
     }
     async createProfile() {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.CreateProfile,
-            ao: this.ao,
-            signer: this.signer
         });
         if (res.tags?.Status === "200" && res.id) {
             // The profile is created for the sender (message sender's address)
@@ -183,15 +177,13 @@ export class SubspaceClient extends SubspaceClientReadOnly {
         throw new Error('Failed to create profile');
     }
     async createServer(params) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.CreateServer,
             tags: {
                 Name: params.name,
                 Logo: params.logo
             },
-            ao: this.ao,
-            signer: this.signer
         });
         if (res.tags?.Status === "200" && res.tags?.ServerAnchor) {
             const server = await this.anchorToServer(res.tags.ServerAnchor);
@@ -200,36 +192,32 @@ export class SubspaceClient extends SubspaceClientReadOnly {
         throw new Error('Failed to create server');
     }
     async getBot(botProcess) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.BotInfo,
             tags: { BotProcess: botProcess },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
-        return new Bot(data, this.ao, this.signer);
+        return new Bot(data, this.ao);
     }
     async anchorToBot(botAnchor) {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToBot,
             tags: { BotAnchor: botAnchor },
-            ao: this.ao
         });
         const data = JSON.parse(res.Data);
-        return new Bot(data, this.ao, this.signer);
+        return new Bot(data, this.ao);
     }
     async createBot(params) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.CreateBot,
             tags: {
                 BotName: params.botName,
                 BotPfp: params.botPfp,
                 BotPublic: params.publicBot ? "true" : "false"
             },
-            ao: this.ao,
-            signer: this.signer
         });
         if (res.tags?.Status === "200" && res.tags?.BotAnchor) {
             const botAnchor = res.tags.BotAnchor;
@@ -242,27 +230,23 @@ export class SubspaceClient extends SubspaceClientReadOnly {
         throw new Error('Failed to create bot');
     }
     async addBot(params) {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.AddBot,
             tags: {
                 BotProcess: params.botProcess,
                 ServerId: params.serverId
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }
     async removeBot(params) {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: params.serverId,
             action: Constants.Actions.RemoveBot,
             tags: {
                 BotProcess: params.botProcess
             },
-            ao: this.ao,
-            signer: this.signer
         });
         return res.tags?.Status === "200";
     }

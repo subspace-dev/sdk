@@ -5,8 +5,9 @@ json = require("json")
 --- VARIABLES
 
 Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
-ServerSrc = "5UC-dijASJI7u3qjH3KJsrm8VEDUVNaDnwqx_D8Fv5U"
-DmSrc = "2pBFEMxoP80EDG02DdLEf8o2yYY3lGkx_oDEVnPaPzY"
+ServerSrc = "ICCVtZipDeq52AQyEJWGgkVVQP5VCS9aM4LIr_AR3AE"
+DmSrc = "AxxRYQUkQisZtB9VpBdNySFvDyW-VV45lvJEbnicO-A"
+BotSrc = "zu66NnB9n9lTMVtn6GKUTRAt1sKSKU_-RFNn6wjrB_Q"
 
 ----------------------------------------------------------------------------
 

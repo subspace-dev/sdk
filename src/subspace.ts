@@ -13,23 +13,22 @@ import { Bot } from "./bot";
 export class SubspaceClientReadOnly implements ISubspaceReadOnly {
     readonly CU_URL: string = "https://cu.arnode.asia"
     readonly GATEWAY_URL: string = "https://arnode.asia"
-    ao: AoClient
+    ao: AO
 
     constructor(params: SubspaceConfigReadOnly) {
-        Object.assign(this, params)
-        this.ao = connect({
-            MODE: "legacy",
+        this.CU_URL = params.CU_URL || this.CU_URL
+        this.GATEWAY_URL = params.GATEWAY_URL || this.GATEWAY_URL
+        this.ao = new AO({
             CU_URL: this.CU_URL,
-            GATEWAY_URL: this.GATEWAY_URL
+            GATEWAY_URL: this.GATEWAY_URL,
         })
     }
 
     async getProfile(userId: string): Promise<IProfileReadOnly | null> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetProfile,
-            tags: { UserId: userId },
-            ao: this.ao
+            tags: { UserId: userId }
         })
 
         const data = JSON.parse(res.Data) as IProfileReadOnly
@@ -37,11 +36,10 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
     }
 
     async getBulkProfiles(userIds: string[]): Promise<Array<IProfileReadOnly>> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetBulkProfile,
             tags: { UserIds: JSON.stringify(userIds) },
-            ao: this.ao
         })
 
         const data = JSON.parse(res.Data) as IProfileReadOnly[]
@@ -49,11 +47,10 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
     }
 
     async anchorToServer(anchorId: string): Promise<IServerReadOnly> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToServer,
             tags: { AnchorId: anchorId },
-            ao: this.ao
         })
 
         const serverId = res['ServerId']
@@ -70,10 +67,9 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
     }
 
     async getServer(serverId: string): Promise<ServerReadOnly | null> {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: serverId,
             action: Constants.Actions.Info,
-            ao: this.ao
         })
 
         const server: IServerReadOnly = {
@@ -90,22 +86,20 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
     }
 
     async getOriginalId(userId: string): Promise<string> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetOriginalId,
             tags: { UserId: userId },
-            ao: this.ao
         })
 
         return res['OriginalId']
     }
 
     async getBot(botProcess: string): Promise<IBotReadOnly | null> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.BotInfo,
             tags: { BotProcess: botProcess },
-            ao: this.ao
         })
 
         const data = JSON.parse(res.Data) as IBotReadOnly
@@ -113,11 +107,10 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
     }
 
     async anchorToBot(botAnchor: string): Promise<IBotReadOnly | null> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToBot,
             tags: { BotAnchor: botAnchor },
-            ao: this.ao
         })
 
         const data = JSON.parse(res.Data) as IBotReadOnly
@@ -128,45 +121,49 @@ export class SubspaceClientReadOnly implements ISubspaceReadOnly {
 // ---------------- Subspace writable client ---------------- //
 
 export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace {
-    private readonly signer: AoSigner
 
     constructor(params: SubspaceConfig) {
         super(params)
-        this.signer = params.signer
         Object.assign(this, params)
+        if (params.signer) {
+            this.ao = new AO({
+                CU_URL: this.CU_URL,
+                GATEWAY_URL: this.GATEWAY_URL,
+                signer: params.signer
+            })
+        } else {
+            throw new Error('Signer is required')
+        }
     }
 
     async getProfile(userId?: string): Promise<IProfile | null> {
         const tags = userId ? { UserId: userId } : undefined
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetProfile,
             tags: tags,
-            ao: this.ao
         })
 
         const data = JSON.parse(res.Data) as IProfile
-        return new Profile(data, this.ao, this.signer)
+        return new Profile(data, this.ao)
     }
 
     async getBulkProfiles(userIds: string[]): Promise<Array<IProfile>> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.GetBulkProfile,
             tags: { UserIds: JSON.stringify(userIds) },
-            ao: this.ao
         })
 
         const data = JSON.parse(res.Data) as IProfile[]
-        return data.map(profile => new Profile(profile, this.ao, this.signer))
+        return data.map(profile => new Profile(profile, this.ao))
     }
 
     async anchorToServer(anchorId: string): Promise<Server> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToServer,
             tags: { AnchorId: anchorId },
-            ao: this.ao
         })
 
         const serverId = res['ServerId']
@@ -183,10 +180,9 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
     }
 
     async getServer(serverId: string): Promise<Server | null> {
-        const res = await AO.read({
+        const res = await this.ao.read({
             process: serverId,
             action: Constants.Actions.Info,
-            ao: this.ao
         })
 
         const server: IServerReadOnly = {
@@ -199,15 +195,13 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
             roles: 'Roles' in res ? JSON.parse(res['Roles']) : [],
         }
 
-        return new Server(server, this.ao, this.signer)
+        return new Server(server, this.ao)
     }
 
     async createProfile(): Promise<IProfile> {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.CreateProfile,
-            ao: this.ao,
-            signer: this.signer
         })
 
         if (res.tags?.Status === "200" && res.id) {
@@ -222,15 +216,13 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
     }
 
     async createServer(params: createServerParams): Promise<Server> {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.CreateServer,
             tags: {
                 Name: params.name,
                 Logo: params.logo
             },
-            ao: this.ao,
-            signer: this.signer
         })
 
         if (res.tags?.Status === "200" && res.tags?.ServerAnchor) {
@@ -241,40 +233,36 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
     }
 
     async getBot(botProcess: string): Promise<Bot | null> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.BotInfo,
             tags: { BotProcess: botProcess },
-            ao: this.ao
         })
 
         const data = JSON.parse(res.Data) as IBotReadOnly
-        return new Bot(data, this.ao, this.signer)
+        return new Bot(data, this.ao)
     }
 
     async anchorToBot(botAnchor: string): Promise<Bot | null> {
-        const res = await AO.read({
-            process: Constants.Profiles,
+        const res = await this.ao.read({
+            process: Constants.Subspace,
             action: Constants.Actions.AnchorToBot,
             tags: { BotAnchor: botAnchor },
-            ao: this.ao
         })
 
         const data = JSON.parse(res.Data) as IBotReadOnly
-        return new Bot(data, this.ao, this.signer)
+        return new Bot(data, this.ao)
     }
 
     async createBot(params: createBotParams): Promise<Bot> {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.CreateBot,
             tags: {
                 BotName: params.botName,
                 BotPfp: params.botPfp,
                 BotPublic: params.publicBot ? "true" : "false"
             },
-            ao: this.ao,
-            signer: this.signer
         })
 
         if (res.tags?.Status === "200" && res.tags?.BotAnchor) {
@@ -290,29 +278,25 @@ export class SubspaceClient extends SubspaceClientReadOnly implements ISubspace 
     }
 
     async addBot(params: addBotParams): Promise<boolean> {
-        const res = await AO.write({
-            process: Constants.Profiles,
+        const res = await this.ao.write({
+            process: Constants.Subspace,
             action: Constants.Actions.AddBot,
             tags: {
                 BotProcess: params.botProcess,
                 ServerId: params.serverId
             },
-            ao: this.ao,
-            signer: this.signer
         })
 
         return res.tags?.Status === "200"
     }
 
     async removeBot(params: removeBotParams): Promise<boolean> {
-        const res = await AO.write({
+        const res = await this.ao.write({
             process: params.serverId,
             action: Constants.Actions.RemoveBot,
             tags: {
                 BotProcess: params.botProcess
             },
-            ao: this.ao,
-            signer: this.signer
         })
 
         return res.tags?.Status === "200"
