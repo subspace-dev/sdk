@@ -1,9 +1,8 @@
 
-import { IBotReadOnly } from "./types/subspace";
 import { AO } from "./utils/ao";
 
 
-export class Bot implements IBotReadOnly {
+export class Bot {
     private ao: AO
     botProcess: string
     botName: string
@@ -12,7 +11,7 @@ export class Bot implements IBotReadOnly {
     userId: string
     totalServers?: number
 
-    constructor(data: IBotReadOnly, ao: AO) {
+    constructor(data: any, ao: AO) {
         this.ao = ao
         this.botProcess = data.botProcess
         this.botName = data.botName

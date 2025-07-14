@@ -1,5 +1,15 @@
 export const Constants = {
-    Subspace: 'ZrIAe6d6waj7ClOtDgOVH5XFSruDL8u3yCG6lrKYS68',
+    Subspace: 'rmC1Rer0_6gW8h4-V61edHCEwAMQOZY-LMJxXUUrH7o',
+
+    // AO Configuration
+    Scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
+    Module: "33d-3X8mpv6xYBlVB-eXMrPfH5Kzf6Hiwhcv0UA10sw",
+    Profiles: "J-GI_SARbZ8O0km4JiE2lu2KJdZIWMo53X3HrqusXjY",
+
+    CuEndpoints: [
+        "https://cu.arnode.asia",
+        "https://cu.ardrive.io",
+    ],
 
     Actions: {
         // Profile actions

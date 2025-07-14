@@ -5,9 +5,10 @@ export class AO {
     ao;
     signer;
     writable;
+    owner;
     constructor(params = {}) {
-        const cuUrl = params?.CU_URL || this.CU_URL;
-        const gatewayUrl = params?.GATEWAY_URL || this.GATEWAY_URL;
+        const cuUrl = params?.CU_URL;
+        const gatewayUrl = params?.GATEWAY_URL;
         this.ao = connect({ MODE: "legacy", CU_URL: cuUrl, GATEWAY_URL: gatewayUrl });
         this.signer = params.signer;
         if (this.signer) {
@@ -16,10 +17,11 @@ export class AO {
         else {
             this.writable = false;
         }
+        this.owner = params.Owner || "NA";
     }
     async read(params) {
         const dryrunInput = {
-            process: params.process,
+            process: params.process
         };
         if (params.data) {
             dryrunInput['data'] = params.data;
@@ -35,9 +37,7 @@ export class AO {
                 dryrunInput['tags'] = [{ name: 'Action', value: params.action }];
             }
         }
-        if (params.owner) {
-            dryrunInput['Owner'] = params.owner;
-        }
+        dryrunInput['Owner'] = params.owner || this.owner;
         if (!params.retries)
             params.retries = 3;
         let attempts = 0;
@@ -62,7 +62,7 @@ export class AO {
             throw new Error(`Read Error\n${JSON.stringify(result, null, 2)}\nInputs:${JSON.stringify(params, null, 2)}`);
         }
         if (!result.Messages || result.Messages.length == 0) {
-            console.dir(result, { depth: null });
+            console.log("result", result);
             throw new Error(`Read Failed, No messages returned\nInputs: ${JSON.stringify(params, null, 2)}`);
         }
         if (result.Messages.length > 1) {
@@ -92,9 +92,13 @@ export class AO {
         return response;
     }
     async write(params) {
+        const signer = params.signer || this.signer;
+        if (!signer) {
+            throw new Error("No signer provided. A signer is required for write operations.");
+        }
         const writeInput = {
             process: params.process,
-            signer: params.signer
+            signer: signer
         };
         if (params.data) {
             writeInput['data'] = params.data;
@@ -109,9 +113,6 @@ export class AO {
             if (params.action) {
                 writeInput['tags'] = [{ name: 'Action', value: params.action }];
             }
-        }
-        if (params.signer) {
-            writeInput['signer'] = params.signer;
         }
         if (!params.retries)
             params.retries = 3;
@@ -158,10 +159,21 @@ export class AO {
         if (!result.Messages || result.Messages.length == 0) {
             throw new Error(`Write Failed, No messages returned\nInputs: ${JSON.stringify(params, null, 2)}`);
         }
+        let msg = result.Messages[0];
         if (result.Messages.length > 1) {
-            throw new Error(`Write Failed, Multiple messages returned\n${JSON.stringify(result.Messages, null, 2)}\nInputs: ${JSON.stringify(params, null, 2)}`);
+            // find the message with `Action-Response` like tag
+            // throw new Error(`Write Failed, Multiple messages returned\n${JSON.stringify(result.Messages, null, 2)}\nInputs: ${JSON.stringify(params, null, 2)}`)
+            for (const msg_ of result.Messages) {
+                const tags = msg_.Tags.reduce((acc, tag) => {
+                    acc[tag.name] = tag.value;
+                    return acc;
+                }, {});
+                const action = tags['Action'];
+                if (action.endsWith("Response")) {
+                    msg = msg_;
+                }
+            }
         }
-        const msg = result.Messages[0];
         const tags = msg.Tags.reduce((acc, tag) => {
             acc[tag.name] = tag.value;
             return acc;

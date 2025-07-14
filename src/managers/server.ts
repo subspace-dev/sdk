@@ -1,0 +1,601 @@
+import { ConnectionManager } from "../connection-manager";
+import { Constants } from "../utils/constants";
+import type { Tag } from "../types/ao";
+
+export interface Server {
+    serverId: string;
+    ownerId: string;
+    name: string;
+    logo?: string;
+    description?: string;
+    memberCount: number;
+    members?: Member[];
+    channels: Channel[];
+    categories: Category[];
+    roles: Role[];
+    createdAt?: number;
+}
+
+export interface Member {
+    userId: string;
+    serverId: string;
+    nickname?: string;
+    roles: string[];
+    joinedAt?: number;
+    permissions?: any;
+}
+
+export interface Channel {
+    channelId: string;
+    name: string;
+    serverId: string;
+    categoryId?: string;
+    orderId?: number;
+    allowMessaging?: 0 | 1;
+    allowAttachments?: 0 | 1;
+    description?: string;
+    type?: 'text' | 'voice';
+}
+
+export interface Category {
+    categoryId: string;
+    serverId: string;
+    name: string;
+    orderId?: number;
+    allowMessaging?: 0 | 1;
+    allowAttachments?: 0 | 1;
+}
+
+export interface Role {
+    roleId: string;
+    name: string;
+    serverId: string;
+    color?: string;
+    position: number;
+    permissions: any;
+    mentionable?: boolean;
+    hoisted?: boolean;
+}
+
+export interface Message {
+    messageId: string;
+    serverId: string;
+    channelId: string;
+    senderId: string;
+    content: string;
+    timestamp: number;
+    attachments?: string;
+    replyTo?: string;
+    edited?: boolean;
+    editedAt?: number;
+}
+
+export interface MessagesResponse {
+    messages: Message[];
+    hasMore: boolean;
+    cursor?: string;
+}
+
+export class ServerManager {
+    constructor(private connectionManager: ConnectionManager) { }
+
+    async createServer(params: { name: string; logo?: string; description?: string }): Promise<string | null> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.CreateServer },
+                { name: "Name", value: params.name }
+            ];
+
+            if (params.logo) tags.push({ name: "Logo", value: params.logo });
+            if (params.description) tags.push({ name: "Description", value: params.description });
+
+            const serverId = await this.connectionManager.spawn({ tags });
+            if (!serverId) return null;
+
+            // Initialize server with default setup
+            await this.connectionManager.execLua({
+                processId: serverId,
+                code: `-- Server initialization code would go here`,
+                tags: [{ name: "Action", value: "Initialize" }]
+            });
+
+            return serverId;
+        } catch (error) {
+            console.error('Failed to create server:', error);
+            return null;
+        }
+    }
+
+    async getServer(serverId: string): Promise<Server | null> {
+        try {
+            const res = await this.connectionManager.dryrun({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.Info }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data ? data as Server : null;
+        } catch (error) {
+            console.error('Failed to get server:', error);
+            return null;
+        }
+    }
+
+    async updateServer(serverId: string, params: { name?: string; logo?: string; description?: string }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.UpdateServer }
+            ];
+
+            if (params.name) tags.push({ name: "Name", value: params.name });
+            if (params.logo) tags.push({ name: "Logo", value: params.logo });
+            if (params.description) tags.push({ name: "Description", value: params.description });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to update server:', error);
+            return false;
+        }
+    }
+
+    async getMember(serverId: string, userId: string): Promise<Member | null> {
+        try {
+            const res = await this.connectionManager.dryrun({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.GetMember },
+                    { name: "UserId", value: userId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data ? data as Member : null;
+        } catch (error) {
+            console.error('Failed to get member:', error);
+            return null;
+        }
+    }
+
+    async getAllMembers(serverId: string): Promise<Member[]> {
+        try {
+            const res = await this.connectionManager.dryrun({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.GetAllMembers }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data || [];
+        } catch (error) {
+            console.error('Failed to get all members:', error);
+            return [];
+        }
+    }
+
+    async updateMember(serverId: string, params: { userId: string; nickname?: string; roles?: string[] }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.UpdateMember },
+                { name: "UserId", value: params.userId }
+            ];
+
+            if (params.nickname) tags.push({ name: "Nickname", value: params.nickname });
+            if (params.roles) tags.push({ name: "Roles", value: JSON.stringify(params.roles) });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to update member:', error);
+            return false;
+        }
+    }
+
+    async kickMember(serverId: string, userId: string): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.KickMember },
+                    { name: "UserId", value: userId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to kick member:', error);
+            return false;
+        }
+    }
+
+    async banMember(serverId: string, userId: string): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.BanMember },
+                    { name: "UserId", value: userId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to ban member:', error);
+            return false;
+        }
+    }
+
+    async unbanMember(serverId: string, userId: string): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.UnbanMember },
+                    { name: "UserId", value: userId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to unban member:', error);
+            return false;
+        }
+    }
+
+    async createCategory(serverId: string, params: { name: string; orderId?: number }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.CreateCategory },
+                { name: "Name", value: params.name }
+            ];
+
+            if (params.orderId !== undefined) {
+                tags.push({ name: "OrderId", value: params.orderId.toString() });
+            }
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to create category:', error);
+            return false;
+        }
+    }
+
+    async updateCategory(serverId: string, params: { categoryId: string; name?: string; orderId?: number }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.UpdateCategory },
+                { name: "CategoryId", value: params.categoryId }
+            ];
+
+            if (params.name) tags.push({ name: "Name", value: params.name });
+            if (params.orderId !== undefined) {
+                tags.push({ name: "OrderId", value: params.orderId.toString() });
+            }
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to update category:', error);
+            return false;
+        }
+    }
+
+    async deleteCategory(serverId: string, categoryId: string): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.DeleteCategory },
+                    { name: "CategoryId", value: categoryId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to delete category:', error);
+            return false;
+        }
+    }
+
+    async createChannel(serverId: string, params: { name: string; categoryId?: string; orderId?: number; type?: 'text' | 'voice' }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.CreateChannel },
+                { name: "Name", value: params.name }
+            ];
+
+            if (params.categoryId) tags.push({ name: "CategoryId", value: params.categoryId });
+            if (params.orderId !== undefined) tags.push({ name: "OrderId", value: params.orderId.toString() });
+            if (params.type) tags.push({ name: "Type", value: params.type });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to create channel:', error);
+            return false;
+        }
+    }
+
+    async updateChannel(serverId: string, params: { channelId: string; name?: string; categoryId?: string; orderId?: number }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.UpdateChannel },
+                { name: "ChannelId", value: params.channelId }
+            ];
+
+            if (params.name) tags.push({ name: "Name", value: params.name });
+            if (params.categoryId) tags.push({ name: "CategoryId", value: params.categoryId });
+            if (params.orderId !== undefined) tags.push({ name: "OrderId", value: params.orderId.toString() });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to update channel:', error);
+            return false;
+        }
+    }
+
+    async deleteChannel(serverId: string, channelId: string): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.DeleteChannel },
+                    { name: "ChannelId", value: channelId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to delete channel:', error);
+            return false;
+        }
+    }
+
+    async createRole(serverId: string, params: { name: string; color?: string; permissions?: any; position?: number }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.CreateRole },
+                { name: "Name", value: params.name }
+            ];
+
+            if (params.color) tags.push({ name: "Color", value: params.color });
+            if (params.permissions) tags.push({ name: "Permissions", value: JSON.stringify(params.permissions) });
+            if (params.position !== undefined) tags.push({ name: "Position", value: params.position.toString() });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to create role:', error);
+            return false;
+        }
+    }
+
+    async updateRole(serverId: string, params: { roleId: string; name?: string; color?: string; permissions?: any; position?: number }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.UpdateRole },
+                { name: "RoleId", value: params.roleId }
+            ];
+
+            if (params.name) tags.push({ name: "Name", value: params.name });
+            if (params.color) tags.push({ name: "Color", value: params.color });
+            if (params.permissions) tags.push({ name: "Permissions", value: JSON.stringify(params.permissions) });
+            if (params.position !== undefined) tags.push({ name: "Position", value: params.position.toString() });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to update role:', error);
+            return false;
+        }
+    }
+
+    async deleteRole(serverId: string, roleId: string): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.DeleteRole },
+                    { name: "RoleId", value: roleId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to delete role:', error);
+            return false;
+        }
+    }
+
+    async assignRole(serverId: string, params: { userId: string; roleId: string }): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.AssignRole },
+                    { name: "UserId", value: params.userId },
+                    { name: "RoleId", value: params.roleId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to assign role:', error);
+            return false;
+        }
+    }
+
+    async unassignRole(serverId: string, params: { userId: string; roleId: string }): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.UnassignRole },
+                    { name: "UserId", value: params.userId },
+                    { name: "RoleId", value: params.roleId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to unassign role:', error);
+            return false;
+        }
+    }
+
+    async sendMessage(serverId: string, params: { channelId: string; content: string; attachments?: string; replyTo?: string }): Promise<boolean> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.SendMessage },
+                { name: "ChannelId", value: params.channelId },
+                { name: "Content", value: params.content }
+            ];
+
+            if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
+            if (params.replyTo) tags.push({ name: "ReplyTo", value: params.replyTo });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to send message:', error);
+            return false;
+        }
+    }
+
+    async editMessage(serverId: string, params: { messageId: string; content: string }): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.EditMessage },
+                    { name: "MessageId", value: params.messageId },
+                    { name: "Content", value: params.content }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to edit message:', error);
+            return false;
+        }
+    }
+
+    async deleteMessage(serverId: string, messageId: string): Promise<boolean> {
+        try {
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.DeleteMessage },
+                    { name: "MessageId", value: messageId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success === true;
+        } catch (error) {
+            console.error('Failed to delete message:', error);
+            return false;
+        }
+    }
+
+    async getMessage(serverId: string, messageId: string): Promise<Message | null> {
+        try {
+            const res = await this.connectionManager.dryrun({
+                processId: serverId,
+                tags: [
+                    { name: "Action", value: Constants.Actions.GetSingleMessage },
+                    { name: "MessageId", value: messageId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data ? data as Message : null;
+        } catch (error) {
+            console.error('Failed to get message:', error);
+            return null;
+        }
+    }
+
+    async getMessages(serverId: string, params: { channelId: string; limit?: number; before?: string; after?: string }): Promise<MessagesResponse | null> {
+        try {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.GetMessages },
+                { name: "ChannelId", value: params.channelId }
+            ];
+
+            if (params.limit) tags.push({ name: "Limit", value: params.limit.toString() });
+            if (params.before) tags.push({ name: "Before", value: params.before });
+            if (params.after) tags.push({ name: "After", value: params.after });
+
+            const res = await this.connectionManager.dryrun({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data ? data as MessagesResponse : null;
+        } catch (error) {
+            console.error('Failed to get messages:', error);
+            return null;
+        }
+    }
+} 

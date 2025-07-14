@@ -1,5 +1,9 @@
 export declare const Constants: {
+    Subspace: string;
+    Scheduler: string;
+    Module: string;
     Profiles: string;
+    CuEndpoints: string[];
     Actions: {
         GetProfile: string;
         GetBulkProfile: string;

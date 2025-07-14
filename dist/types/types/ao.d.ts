@@ -1,13 +1,3 @@
-import { result, results, message, spawn, monitor, unmonitor, dryrun } from "@permaweb/aoconnect";
-export interface AoClient {
-    result: typeof result;
-    results: typeof results;
-    message: typeof message;
-    spawn: typeof spawn;
-    monitor: typeof monitor;
-    unmonitor: typeof unmonitor;
-    dryrun: typeof dryrun;
-}
 export type Tag = {
     name: string;
     value: string;
@@ -27,9 +17,9 @@ export type AoSigner = (args: {
 }) => Promise<{
     id: string;
     raw: ArrayBuffer;
-}>;
+} | null>;
 export type ReadOptions = {
-    ao?: AoClient;
+    ao?: any;
     process: string;
     action?: string;
     tags?: TagsKV;
@@ -38,7 +28,7 @@ export type ReadOptions = {
     retries?: number;
 };
 export type WriteOptions = {
-    ao?: AoClient;
+    ao?: any;
     process: string;
     action?: string;
     tags?: TagsKV;

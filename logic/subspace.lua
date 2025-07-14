@@ -5,7 +5,7 @@ json = require("json")
 --- VARIABLES
 
 Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
-ServerSrc = "ICCVtZipDeq52AQyEJWGgkVVQP5VCS9aM4LIr_AR3AE"
+ServerSrc = "eT3BeW76RP-jHYbs_et3Em33L-hjpGelqA_w4vct4iU"
 DmSrc = "AxxRYQUkQisZtB9VpBdNySFvDyW-VV45lvJEbnicO-A"
 BotSrc = "zu66NnB9n9lTMVtn6GKUTRAt1sKSKU_-RFNn6wjrB_Q"
 
@@ -148,7 +148,8 @@ function GetProfile(userId)
     local profile = SQLRead("SELECT * FROM profiles WHERE userId = ?", userId)
     if profile and #profile > 0 then
         profile = profile[1]
-        local servers = SQLRead("SELECT * FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", userId)
+        local servers = SQLRead("SELECT serverId,orderId FROM serversJoined WHERE userId = ? ORDER BY orderId ASC",
+            userId)
         local delegations = SQLRead("SELECT * FROM delegations WHERE userId = ?", userId)
 
         local friendData = {
@@ -629,6 +630,7 @@ Handlers.add("Join-Server", function(msg)
 
     -- Send message to server to add the user to the server
     ao.send({
+        Target = serverId,
         Action = "Join-Server",
         Tags = {
             UserId = userId

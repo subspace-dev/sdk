@@ -1,9 +1,8 @@
-import { IDirectMessageReadOnly, IEventReadOnly, IMessageReadOnly } from "./subspace";
 export type DMResponse = {
-    messages: IDirectMessageReadOnly[];
-    events: IEventReadOnly[];
+    messages: any[];
+    events: any[];
 };
 export type GetMessagesResponse = {
-    messages: IMessageReadOnly[];
+    messages: any[];
     channelScope: "single" | "all";
 };

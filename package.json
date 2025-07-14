@@ -25,7 +25,7 @@
     "clean": "rm -rf dist",
     "postbuild": "node scripts/postbuild.js",
     "prepublishOnly": "npm run build",
-    "dev": "tsc --watch",
+    "dev": "tsc --watch ",
     "typecheck": "tsc --noEmit",
     "publish-npm": "npm run build && npm publish --access public"
   },

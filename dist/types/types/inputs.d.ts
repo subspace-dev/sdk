@@ -1,10 +1,9 @@
 import { AoSigner } from "./ao";
-export type SubspaceConfigReadOnly = {
+export type SubspaceConfig = {
     CU_URL?: string;
     GATEWAY_URL?: string;
-};
-export type SubspaceConfig = SubspaceConfigReadOnly & {
-    signer: AoSigner;
+    Owner?: string;
+    signer?: AoSigner;
 };
 export type updateProfileParams = {
     Pfp?: string;
@@ -115,5 +114,11 @@ export type addBotParams = {
 };
 export type removeBotParams = {
     botProcess: string;
+    serverId: string;
+};
+export type joinServerParams = {
+    serverId: string;
+};
+export type leaveServerParams = {
     serverId: string;
 };

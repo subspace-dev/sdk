@@ -1,16 +1,19 @@
 import { connect } from "@permaweb/aoconnect";
-import { AoClient, AoSigner, MessageResult, ReadOptions, Tag, TagsKV, WriteOptions, WriteResult } from "../types/ao";
+import { AoSigner, MessageResult, ReadOptions, Tag, TagsKV, WriteOptions, WriteResult } from "../types/ao";
 
 export class AO {
     readonly CU_URL: string
     readonly GATEWAY_URL: string
-    readonly ao: AoClient
+    readonly ao: any
     private signer: AoSigner
     readonly writable: boolean
+    readonly owner: string
 
-    constructor(params: Partial<{ CU_URL: string, GATEWAY_URL: string, signer: AoSigner }> = {}) {
-        const cuUrl = params?.CU_URL || this.CU_URL
-        const gatewayUrl = params?.GATEWAY_URL || this.GATEWAY_URL
+    constructor(params: Partial<{ CU_URL: string, GATEWAY_URL: string, signer: AoSigner, Owner: string }> = {}) {
+        const cuUrl = params?.CU_URL
+        const gatewayUrl = params?.GATEWAY_URL
+
+
 
         this.ao = connect({ MODE: "legacy", CU_URL: cuUrl, GATEWAY_URL: gatewayUrl })
         this.signer = params.signer
@@ -19,11 +22,12 @@ export class AO {
         } else {
             this.writable = false
         }
+        this.owner = params.Owner || "NA"
     }
 
     async read(params: ReadOptions): Promise<TagsKV> {
         const dryrunInput = {
-            process: params.process,
+            process: params.process
         }
 
         if (params.data) {
@@ -41,9 +45,7 @@ export class AO {
             }
         }
 
-        if (params.owner) {
-            dryrunInput['Owner'] = params.owner
-        }
+        dryrunInput['Owner'] = params.owner || this.owner
 
         if (!params.retries) params.retries = 3
 
@@ -72,7 +74,7 @@ export class AO {
         }
 
         if (!result.Messages || result.Messages.length == 0) {
-            console.dir(result, { depth: null })
+            console.log("result", result)
             throw new Error(`Read Failed, No messages returned\nInputs: ${JSON.stringify(params, null, 2)}`)
         }
 
@@ -110,9 +112,15 @@ export class AO {
     }
 
     async write(params: WriteOptions): Promise<WriteResult> {
-        const writeInput = {
+        const signer = params.signer || this.signer
+
+        if (!signer) {
+            throw new Error("No signer provided. A signer is required for write operations.")
+        }
+
+        const writeInput: any = {
             process: params.process,
-            signer: params.signer
+            signer: signer
         }
 
         if (params.data) {
@@ -128,10 +136,6 @@ export class AO {
             if (params.action) {
                 writeInput['tags'] = [{ name: 'Action', value: params.action }]
             }
-        }
-
-        if (params.signer) {
-            writeInput['signer'] = params.signer
         }
 
         if (!params.retries) params.retries = 3
@@ -188,11 +192,24 @@ export class AO {
             throw new Error(`Write Failed, No messages returned\nInputs: ${JSON.stringify(params, null, 2)}`)
         }
 
+        let msg = result.Messages[0]
+
         if (result.Messages.length > 1) {
-            throw new Error(`Write Failed, Multiple messages returned\n${JSON.stringify(result.Messages, null, 2)}\nInputs: ${JSON.stringify(params, null, 2)}`)
+            // find the message with `Action-Response` like tag
+            // throw new Error(`Write Failed, Multiple messages returned\n${JSON.stringify(result.Messages, null, 2)}\nInputs: ${JSON.stringify(params, null, 2)}`)
+
+            for (const msg_ of result.Messages) {
+                const tags = (msg_.Tags as Tag[]).reduce((acc, tag) => {
+                    acc[tag.name] = tag.value
+                    return acc
+                }, {} as Record<string, string>)
+                const action = tags['Action']
+                if (action.endsWith("Response")) {
+                    msg = msg_
+                }
+            }
         }
 
-        const msg = result.Messages[0]
 
         const tags = (msg.Tags as Tag[]).reduce((acc, tag) => {
             acc[tag.name] = tag.value

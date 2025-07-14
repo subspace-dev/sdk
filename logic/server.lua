@@ -10,7 +10,7 @@ Name = Name or ""
 Logo = Logo or ""
 Balances = Balances or { [ao.id] = 1 }
 TotalSupply = TotalSupply or 1
-Denomination = Denomination or 1
+Denomination = Denomination or 10
 Ticker = Ticker or ""
 
 -- By default servers are public and anyone can join
@@ -80,8 +80,8 @@ db:exec([[
         categoryId INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         orderId INTEGER NOT NULL DEFAULT 1,
-        allowMessaging INTEGER NOT NULL DEFAULT 0,
-        allowAttachments INTEGER NOT NULL DEFAULT 0
+        allowMessaging INTEGER NOT NULL DEFAULT 1,
+        allowAttachments INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS channels (
@@ -89,8 +89,8 @@ db:exec([[
         name TEXT NOT NULL,
         orderId INTEGER NOT NULL DEFAULT 1,
         categoryId INTEGER,
-        allowMessaging INTEGER NOT NULL DEFAULT 0,
-        allowAttachments INTEGER NOT NULL DEFAULT 0,
+        allowMessaging INTEGER DEFAULT NULL,
+        allowAttachments INTEGER DEFAULT NULL,
         FOREIGN KEY (categoryId) REFERENCES categories(categoryId) ON DELETE SET NULL
     );
 
@@ -141,6 +141,18 @@ db:exec([[
         botApproved INTEGER NOT NULL DEFAULT 0
     );
 ]])
+
+-- create default category and channel if the tables are empty
+-- Welcome
+-- - General with Welcome as parent category
+if SQLRead("SELECT COUNT(*) as catCount FROM categories")[1].catCount == 0 then
+    SQLWrite("INSERT INTO categories (name, orderId) VALUES (?, ?)", "Welcome", 1)
+end
+
+if SQLRead("SELECT COUNT(*) as chanCount FROM channels")[1].chanCount == 0 then
+    SQLWrite("INSERT INTO channels (name, orderId, categoryId) VALUES (?, ?, ?)",
+        "General", 1, 1)
+end
 
 SubscribedBots = {}
 
@@ -431,6 +443,8 @@ Handlers.add("Info", function(msg)
     local categories = SQLRead("SELECT * FROM categories ORDER BY orderId ASC")
     local channels = SQLRead("SELECT * FROM channels ORDER BY orderId ASC")
     local roles = SQLRead("SELECT * FROM roles ORDER BY orderId ASC")
+
+    local memberCount = #SQLRead("SELECT COUNT(*) as  FROM members")
     -- local members = SQLRead("SELECT * FROM members")
     -- local memberRoles = SQLRead("SELECT * FROM memberRoles")
 
@@ -457,7 +471,7 @@ Handlers.add("Info", function(msg)
     -- end
 
     msg.reply({
-        Action = "Info",
+        Action = "Info-Response",
         Name = Name,
         Logo = Logo,
         Owner = ServerOwner,
@@ -465,9 +479,11 @@ Handlers.add("Info", function(msg)
         Channels = json.encode(channels),
         Roles = json.encode(roles),
         PublicServer = PublicServer,
+        MemberCount = tostring(memberCount),
         -- IGNORE REST
         Denomination = tostring(Denomination),
         Ticker = Ticker,
+        Status = "200"
     })
 end)
 
@@ -511,9 +527,9 @@ Handlers.add("Join-Server", function(msg)
 
     local member = GetMember(userId)
     if ValidateCondition(member, msg, {
-            Status = "400",
+            Status = "200",
             Data = json.encode({
-                error = "User is already in the server"
+                message = "User is already in the server"
             })
         }) then
         return
@@ -1497,7 +1513,8 @@ Handlers.add("Get-All-Members", function(msg)
 
     msg.reply({
         Action = "Get-Members-Response",
-        Members = json.encode(membersArranged)
+        Status = "200",
+        Data = json.encode(membersArranged)
     })
 end)
 
