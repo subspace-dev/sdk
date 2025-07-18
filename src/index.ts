@@ -28,11 +28,6 @@ export class Subspace {
         this.connectionManager.updateConfig(config);
     }
 
-    // Method to switch compute unit if needed
-    switchCu() {
-        this.connectionManager.switchCu();
-    }
-
     // Convenience method for getting current connection info
     getConnectionInfo() {
         return {

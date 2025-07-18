@@ -50,6 +50,8 @@ export class UserManager {
     constructor(private connectionManager: ConnectionManager) { }
 
     async getProfile(userId: string): Promise<Profile | null> {
+        const start = Date.now();
+
         try {
             const res = await this.connectionManager.dryrun({
                 processId: Constants.Subspace,
@@ -60,9 +62,26 @@ export class UserManager {
             });
 
             const data = JSON.parse(this.connectionManager.parseOutput(res).Data);
-            return data ? data as Profile : null;
+
+            if (data) {
+                if (data.error) throw new Error(data.error);
+                return data as Profile;
+            } else {
+                return null;
+            }
         } catch (error) {
-            console.error('Failed to get profile:', error);
+            console.error(error)
+            console.info(userId, this.connectionManager.owner)
+            if (userId == this.connectionManager.owner) {
+                console.info("profile not found, creating new")
+                const profileId = await this.createProfile()
+                if (profileId) {
+                    return this.getProfile(userId)
+                } else {
+                    return null
+                }
+            }
+            const duration = Date.now() - start;
             return null;
         }
     }
@@ -80,24 +99,62 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data || [];
         } catch (error) {
-            console.error('Failed to get bulk profiles:', error);
             return [];
         }
     }
 
     async createProfile(): Promise<string | null> {
+        const start = Date.now();
+
         try {
+
+            // spawn dm process
+            const dmProcess = await this.connectionManager.spawn({
+                tags: [
+                    { name: "Action", value: Constants.Actions.CreateProfile },
+                    { name: "Owner", value: this.connectionManager.owner }
+                ]
+            })
+
+            console.log("DmProcess:", dmProcess)
+
+
+            // retry 3 times to wait for this.connectionManager.sources.Dm.Lua to populate
+            for (let i = 0; i < 3; i++) {
+                if (this.connectionManager.sources.Dm.Lua) break
+                await new Promise(resolve => setTimeout(resolve, 1000 * i))
+            }
+
+            if (!this.connectionManager.sources.Dm.Lua) {
+                throw new Error("Failed to get dm source")
+            }
+
+            const dmRes = await this.connectionManager.execLua({
+                processId: dmProcess,
+                code: this.connectionManager.sources.Dm.Lua,
+                tags: []
+            })
+            console.log("Hydrate DM:", dmRes.id)
+
+            // wait 1.5 seconds for dm process to finish
+            await new Promise(resolve => setTimeout(resolve, 1500))
+
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
-                    { name: "Action", value: Constants.Actions.CreateProfile }
+                    { name: "Action", value: Constants.Actions.CreateProfile },
+                    { name: "DmProcess", value: dmProcess }
                 ]
             });
 
+            console.log("res", res)
             const data = this.connectionManager.parseOutput(res);
+            console.log("data", data)
+            const duration = Date.now() - start;
+
             return data?.profileId || null;
         } catch (error) {
-            console.error('Failed to create profile:', error);
+            const duration = Date.now() - start;
             return null;
         }
     }
@@ -121,7 +178,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to update profile:', error);
             return false;
         }
     }
@@ -139,7 +195,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data || [];
         } catch (error) {
-            console.error('Failed to get notifications:', error);
             return [];
         }
     }
@@ -157,7 +212,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to send friend request:', error);
             return false;
         }
     }
@@ -175,7 +229,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to accept friend request:', error);
             return false;
         }
     }
@@ -193,7 +246,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to reject friend request:', error);
             return false;
         }
     }
@@ -211,7 +263,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to remove friend:', error);
             return false;
         }
     }
@@ -234,7 +285,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data ? data as DMResponse : null;
         } catch (error) {
-            console.error('Failed to get DMs:', error);
             return null;
         }
     }
@@ -257,7 +307,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to send DM:', error);
             return false;
         }
     }
@@ -276,7 +325,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to edit DM:', error);
             return false;
         }
     }
@@ -294,7 +342,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to delete DM:', error);
             return false;
         }
     }
@@ -312,7 +359,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to join server:', error);
             return false;
         }
     }
@@ -330,7 +376,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to leave server:', error);
             return false;
         }
     }
@@ -347,7 +392,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to add delegation:', error);
             return false;
         }
     }
@@ -364,7 +408,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to remove delegation:', error);
             return false;
         }
     }
@@ -381,7 +424,6 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to remove all delegations:', error);
             return false;
         }
     }

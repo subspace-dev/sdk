@@ -5,9 +5,30 @@ json = require("json")
 --- VARIABLES
 
 Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
-ServerSrc = "eT3BeW76RP-jHYbs_et3Em33L-hjpGelqA_w4vct4iU"
-DmSrc = "AxxRYQUkQisZtB9VpBdNySFvDyW-VV45lvJEbnicO-A"
-BotSrc = "zu66NnB9n9lTMVtn6GKUTRAt1sKSKU_-RFNn6wjrB_Q"
+
+Sources = {
+    Bot = {
+        Id = "RWv6wuTXNbY3mNlE1sWXC7ZRo7eHSAl_Pq0ogaClEa4",
+        Version = "1.0.0"
+    },
+    Dm = {
+        Id = "emOxhkORaBoT2ZKbhYMQHYyuJahugx7ohR-wNhjjR8Q",
+        Version = "1.0.0"
+    },
+    Server = {
+        Id = "rCTZTPzzAcqPf9VVOg3Khum-TIQ57PZpW5RJ8rRRbig",
+        Version = "1.0.0"
+    },
+}
+
+Handlers.add("Sources", function(msg)
+    msg.reply({
+        Action = "Sources-Response",
+        Status = "200",
+        Data = json.encode(Sources)
+    })
+end)
+
 
 ----------------------------------------------------------------------------
 
@@ -89,7 +110,6 @@ db:exec([[
 
     CREATE TABLE IF NOT EXISTS servers (
         serverId TEXT PRIMARY KEY,
-        anchorId TEXT NOT NULL,
         publicServer INTEGER DEFAULT 1,
         userId TEXT NOT NULL
     );
@@ -123,7 +143,6 @@ db:exec([[
 
     CREATE TABLE IF NOT EXISTS bots (
         userId TEXT NOT NULL,
-        botAnchor TEXT NOT NULL,
         botProcess TEXT PRIMARY KEY,
         botName TEXT NOT NULL,
         botPfp TEXT NOT NULL,
@@ -261,61 +280,75 @@ end
 ----------------------------------------------------------------------------
 --- PROFILES
 
-function CreateProfile(userId)
+Handlers.add("Create-Profile", function(msg)
+    local userId = msg.From
+    local dmProcess = VarOrNil(msg.Tags.DmProcess)
+
     -- check if profile already exists
     local profile = GetProfile(userId)
     if profile then
-        return false
-    end
-
-    SQLWrite("INSERT INTO profiles (userId) VALUES (?)", userId)
-
-    -- spawn a dm process
-    ao.spawn(ao.env.Module.Id, {
-        Tags = {
-            Authority = Authority,
-            ["On-Boot"] = DmSrc
-        }
-    }).onReply(function(msg)
-        if msg.Action == "Spawned" then
-            local dmProcess = msg.Tags.Process
-            ao.send({
-                Target = dmProcess,
-                Action = "Init-Dms",
-                Tags = {
-                    UserId = userId
-                }
-            }).onReply(function(msg)
-                if msg.Action == "Init-Dms-Response" and msg.Status == "200" then
-                    SQLWrite("UPDATE profiles SET dmProcess = ? WHERE userId = ?", dmProcess, userId)
-                end
-            end)
-        end
-    end)
-
-    return true
-end
-
-Handlers.add("Create-Profile", function(msg)
-    local userId = msg.From
-
-    if ValidateCondition(not CreateProfile(userId), msg, {
+        msg.reply({
+            Action = "Create-Profile-Response",
             Status = "400",
             Data = json.encode({
                 error = "Profile already exists"
             })
         })
-    then
         return
     end
 
-    msg.reply({
-        Action = "Create-Profile-Response",
-        Status = "200",
-        Data = json.encode({
-            message = "Profile created"
+    -- verify if dm process is for the correct owner
+    if dmProcess then
+        if #dmProcess ~= 43 then
+            msg.reply({
+                Action = "Create-Profile-Response",
+                Status = "400",
+                Data = json.encode({
+                    error = "Invalid dm process"
+                })
+            })
+            return
+        end
+
+        Send({
+            Target = dmProcess,
+            Action = "Info",
         })
-    })
+        local infoRes = Receive({ Action = "Info-Response", From = dmProcess })
+        if infoRes.Status == "200" then
+            if infoRes.Tags.Owner_ == userId then
+                -- create profile
+                SQLWrite("INSERT INTO profiles (userId, dmProcess) VALUES (?, ?)", userId, dmProcess)
+            else
+                msg.reply({
+                    Action = "Create-Profile-Response",
+                    Status = "400",
+                    Data = json.encode({
+                        error = "Invalid dm process or owner mismatch"
+                    })
+                })
+                return
+            end
+        else
+            msg.reply({
+                Action = "Create-Profile-Response",
+                Status = "400",
+                Data = json.encode({
+                    error = "Invalid dm process or owner mismatch"
+                })
+            })
+            return
+        end
+    else
+        msg.reply({
+            Action = "Create-Profile-Response",
+            Status = "400",
+            Data = json.encode({
+                error = "Invalid dm process or owner mismatch"
+            })
+        })
+        return
+    end
 end)
 
 Handlers.add("Get-Profile", function(msg)
@@ -439,28 +472,7 @@ end)
 Handlers.add("Create-Server", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local Name = VarOrNil(msg.Tags.Name)
-    local Logo = VarOrNil(msg.Tags.Logo)
-
-    if ValidateCondition(not Name, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Name is required"
-            })
-        })
-    then
-        return
-    end
-
-    if ValidateCondition(not Logo, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Logo is required"
-            })
-        })
-    then
-        return
-    end
+    local serverProcess = VarOrNil(msg.Tags.ServerProcess)
 
     local profile = GetProfile(userId)
     if ValidateCondition(not profile, msg, {
@@ -473,69 +485,42 @@ Handlers.add("Create-Server", function(msg)
         return
     end
 
-    local spawnRes = ao.spawn(ao.env.Module.Id, {
-        Tags = {
-            Authority = Authority,
-            ["On-Boot"] = ServerSrc
-        }
-    })
-    local ref = tostring(tonumber(spawnRes.Anchor))
-
-    msg.reply({
-        Action = "Create-Server-Response",
-        Status = "200",
-        ServerAnchor = ref,
-        Data = json.encode({
-            message = "You will get the server id from Anchor-To-Server handler"
-        })
-    })
-
-    local spawnMsg = Receive({ Action = "Spawned", From = ao.id, Reference = ref })
-    local serverId = spawnMsg.Tags.Process
-
-    ao.send({
-        Target = serverId,
-        Action = "Init-Server",
-        Tags = {
-            UserId = userId,
-            Name = Name,
-            Logo = Logo
-        }
-    })
-    local initRes = Receive({ Action = "Init-Server-Response", From = serverId })
-    if initRes.Status == "200" then
-        SQLWrite("INSERT INTO servers (serverId, anchorId, userId) VALUES (?, ?, ?)", serverId, ref, userId)
-    end
-end)
-
-Handlers.add("Anchor-To-Server", function(msg)
-    local anchorId = VarOrNil(msg.Tags.AnchorId)
-    if ValidateCondition(not anchorId, msg, {
+    if ValidateCondition(not serverProcess or #serverProcess ~= 43, msg, {
             Status = "400",
             Data = json.encode({
-                error = "AnchorId is required"
+                error = "Server process is required and must be a valid process id"
             })
         })
     then
         return
     end
 
-    local serverId = SQLRead("SELECT serverId FROM servers WHERE anchorId = ?", anchorId)
-    if serverId and #serverId > 0 then
-        msg.reply({
-            Action = "Anchor-To-Server-Response",
-            Status = "200",
-            ServerId = serverId[1].serverId
+    -- verify if server process is for the correct owner
+    if serverProcess then
+        ao.send({
+            Target = serverProcess,
+            Action = "Info",
         })
-    else
-        msg.reply({
-            Action = "Anchor-To-Server-Response",
-            Status = "404",
-            Data = json.encode({
-                error = "Server not found"
+
+        local infoRes = Receive({ Action = "Info-Response", From = serverProcess })
+        if ValidateCondition(infoRes.Tags.Status ~= "200" or infoRes.Tags.Owner_ ~= userId, msg, {
+                Status = "400",
+                Data = json.encode({
+                    error = "Invalid server process or owner mismatch"
+                })
             })
-        })
+        then
+            return
+        end
     end
+
+    SQLWrite("INSERT INTO servers (serverId, userId) VALUES (?, ?)", serverProcess, userId)
+
+    msg.reply({
+        Action = "Create-Server-Response",
+        Status = "200",
+        ServerId = serverProcess
+    })
 end)
 
 Handlers.add("Update-Server", function(msg)
@@ -1634,24 +1619,12 @@ end)
 Handlers.add("Create-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local botName = VarOrNil(msg.Tags.BotName)
-    local botPfp = VarOrNil(msg.Tags.BotPfp)
-    local publicBot = VarOrNil(msg.Tags.PublicBot)
+    local botProcess = VarOrNil(msg.Tags.BotProcess)
 
-    if ValidateCondition(not botName, msg, {
+    if ValidateCondition(not botProcess or #botProcess ~= 43, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotName is required"
-            })
-        })
-    then
-        return
-    end
-
-    if ValidateCondition(not botPfp, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "BotPfp is required"
+                error = "BotProcess is required and must be a valid process id"
             })
         })
     then
@@ -1669,83 +1642,74 @@ Handlers.add("Create-Bot", function(msg)
         return
     end
 
-    -- pfp should be an arweave txid of length 43
-    if ValidateCondition(#botPfp ~= 43, msg, {
+    -- if publicBot then
+    --     publicBot = (publicBot == "true")
+    -- else
+    --     publicBot = true
+    -- end
+
+    -- verify if bot process is for the correct owner
+    ao.send({
+        Target = botProcess,
+        Action = "Info",
+    })
+
+    local infoRes = Receive({ Action = "Info-Response", From = botProcess })
+    if ValidateCondition(infoRes.Status ~= "200" or infoRes.Tags.Owner_ ~= userId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotPfp must be an arweave txid of length 43"
+                error = "Invalid bot process or owner mismatch"
             })
         })
     then
         return
     end
 
-    if publicBot then
-        publicBot = (publicBot == "true")
-    else
-        publicBot = true
-    end
+    local publicBot = infoRes.Tags.PublicBot
+    PublicBot = (publicBot == "true")
+    local botName = infoRes.Tags.Name
+    local botPfp = infoRes.Tags.Pfp
 
-    local spawnRes = ao.spawn(ao.env.Module.Id, {
-        Tags = {
-            Authority = Authority,
-            ["On-Boot"] = BotSrc
-        }
-    })
-    local ref = tostring(tonumber(spawnRes.Anchor))
+    SQLWrite("INSERT INTO bots (userId, botProcess, botName, botPfp, botPublic) VALUES (?, ?, ?, ?, ?)", userId,
+        botProcess, botName, botPfp, publicBot)
 
     msg.reply({
         Action = "Create-Bot-Response",
         Status = "200",
-        BotAnchor = ref,
-        Data = json.encode({
-            message = "You will get the bot process from Anchor-To-Bot handler"
-        })
+        BotProcess = botProcess
     })
-
-    local spawnMsg = Receive({ Action = "Spawned", From = ao.id, Reference = ref })
-    local botProcess = spawnMsg.Tags.Process
-
-    ao.send({
-        Target = botProcess,
-        Action = "Init-Bot",
-        Tags = {
-            UserId = userId,
-            BotName = botName,
-            BotPfp = botPfp,
-            BotPublic = tostring(publicBot)
-        }
-    })
-
-    local initRes = Receive({ Action = "Init-Bot-Response", From = botProcess })
-    if initRes.Status == "200" then
-        if publicBot then
-            publicBot = 1
-        else
-            publicBot = 0
-        end
-
-        SQLWrite(
-            "INSERT INTO bots (userId, botAnchor, botProcess, botName, botPfp, botPublic) VALUES (?, ?, ?, ?, ?, ?)",
-            userId,
-            ref, botProcess, botName, botPfp, publicBot)
-    end
 end)
 
-Handlers.add("Anchor-To-Bot", function(msg)
-    local botAnchor = VarOrNil(msg.Tags.BotAnchor)
+Handlers.add("Update-Bot", function(msg)
+    local userId = msg.From
+    userId = GetOriginalId(userId)
+    local botId = VarOrNil(msg.Tags.BotProcess)
+    local publicBot = VarOrNil(msg.Tags.PublicBot)
 
-    if ValidateCondition(not botAnchor, msg, {
+    if ValidateCondition(not botId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotAnchor is required"
+                error = "BotProcess is required"
             })
         })
     then
         return
     end
 
-    local bot = SQLRead("SELECT * FROM bots WHERE botAnchor = ?", botAnchor)[1]
+    -- Check if user profile exists
+    local profile = GetProfile(userId)
+    if ValidateCondition(not profile, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Profile not found"
+            })
+        })
+    then
+        return
+    end
+
+    -- Check if bot exists and user is the owner
+    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botId)[1]
     if ValidateCondition(not bot, msg, {
             Status = "404",
             Data = json.encode({
@@ -1756,15 +1720,49 @@ Handlers.add("Anchor-To-Bot", function(msg)
         return
     end
 
+    if ValidateCondition(bot.userId ~= userId, msg, {
+            Status = "403",
+            Data = json.encode({
+                error = "You are not the owner of this bot"
+            })
+        })
+    then
+        return
+    end
+
+    if publicBot then
+        publicBot = (publicBot == "true")
+    end
+
+    local name = VarOrNil(msg.Tags.Name)
+    local pfp = VarOrNil(msg.Tags.Pfp)
+
+    ao.send({
+        Target = botId,
+        Action = "Update-Bot",
+        Tags = {
+            PublicBot = tostring(publicBot),
+            Name = name,
+            Pfp = pfp
+        }
+    })
+
+    local updateResponse = Receive({ Action = "Update-Bot-Response", From = botId })
+    if ValidateCondition(updateResponse.Status ~= "200", msg, {
+            Status = "500",
+            Data = json.encode(updateResponse.Data)
+        }) then
+        return
+    end
+
+    -- update bot in bots table
+    SQLWrite("UPDATE bots SET botPublic = ?, botName = ?, botPfp = ? WHERE botProcess = ?", publicBot, name, pfp, botId)
+
     msg.reply({
-        Action = "Anchor-To-Bot-Response",
+        Action = "Update-Bot-Response",
         Status = "200",
-        BotProcess = bot.botProcess,
-        Data = json.encode(bot)
     })
 end)
-
-
 
 Handlers.add("Bot-Info", function(msg)
     local botProcess = VarOrNil(msg.Tags.BotProcess)

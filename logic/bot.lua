@@ -4,11 +4,11 @@ json = require("json")
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = Subspace or Owner
-BotOwner = BotOwner or ""
-Name = Name or ""
-Pfp = Pfp or ""
-PublicBot = PublicBot or true
+Subspace = "VDkbyJj9o67AtTaYregitjDgcrLWmrxMvKICbWR-kBA"
+Name = Name or "{NAME}"
+Pfp = Pfp or "{PFP}"
+PublicBot = PublicBot or ("{PUBLIC}" == "true")
+Version = Version or "1.0.0"
 
 JoinedServers = {}
 SubscribedServers = {}
@@ -70,58 +70,40 @@ end
 
 ----------------------------------------------------------------------------
 
-Handlers.once("Init-Bot", function(msg)
-    assert(msg.From == Subspace, "You are not allowed to init bots")
-    assert(BotOwner == "", "Bot already initialized")
+Handlers.add("Info", function(msg)
+    msg.reply({
+        Action = "Info-Response",
+        Status = "200",
+        Version = Version,
+        Owner_ = Owner,
+        PublicBot = tostring(PublicBot),
+        Name = Name,
+        Pfp = Pfp,
+        JoinedServers = json.encode(JoinedServers),
+        SubscribedServers = json.encode(SubscribedServers),
+    })
+end)
 
-    local botOwner = VarOrNil(msg.Tags.UserId)
-    local botName = VarOrNil(msg.Tags.BotName)
-    local botPfp = VarOrNil(msg.Tags.BotPfp)
-    local botPublic = VarOrNil(msg.Tags.BotPublic)
+Handlers.add("Update-Bot", function(msg)
+    assert(msg.From == Subspace, "❌[auth error] sender not authorized to update the bot")
 
-    if botPublic then
-        botPublic = (botPublic == "true")
-    else
-        botPublic = true
+    local publicBot = VarOrNil(msg.Tags.PublicBot)
+    if publicBot then
+        publicBot = (publicBot == "true")
     end
 
-    if ValidateCondition(not botOwner, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "UserId is required"
-            })
-        }) then
-        return
-    end
+    local name = VarOrNil(msg.Tags.Name)
+    local pfp = VarOrNil(msg.Tags.Pfp)
 
-    if ValidateCondition(not botName, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Name is required"
-            })
-        }) then
-        return
-    end
-
-    if ValidateCondition(not botPfp, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Pfp is required"
-            })
-        }) then
-        return
-    end
-
-    BotOwner = botOwner
-    Name = botName
-    Pfp = botPfp
-    PublicBot = botPublic
+    SQLWrite("UPDATE bots SET botPublic = ?, botName = ?, botPfp = ? WHERE userId = ?", publicBot, name, pfp, Owner)
 
     msg.reply({
-        Action = "Init-Bot-Response",
+        Action = "Update-Bot-Response",
         Status = "200",
     })
 end)
+
+----------------------------------------------------------------------------
 
 Handlers.add("Join-Server", function(msg)
     assert(msg.From == Subspace, "You are not allowed to join servers")

@@ -4,14 +4,14 @@ json = require("json")
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = Subspace or Owner
-ServerOwner = ServerOwner or ""
-Name = Name or ""
-Logo = Logo or ""
-Balances = Balances or { [ao.id] = 1 }
+Subspace = "VDkbyJj9o67AtTaYregitjDgcrLWmrxMvKICbWR-kBA"
+Name = Name or "{NAME}"
+Logo = Logo or "{LOGO}"
+Balances = Balances or { [Owner] = 1 }
 TotalSupply = TotalSupply or 1
 Denomination = Denomination or 10
-Ticker = Ticker or ""
+Ticker = Ticker or "{TICKER}"
+Version = Version or "1.0.0"
 
 -- By default servers are public and anyone can join
 -- If private, new users cannot join
@@ -223,7 +223,7 @@ function MemberHasPermission(member, permission)
     end
 
     -- if member is the server owner, return true
-    if member.userId == ServerOwner then
+    if member.userId == Owner then
         return true
     end
 
@@ -393,52 +393,6 @@ end
 
 ----------------------------------------------------------------------------
 
-Handlers.once("Init-Server", function(msg)
-    assert(msg.From == Subspace, "❌[Init-Server] Invalid authority")
-    assert(ServerOwner == "", "❌[Init-Server] Server already initialized")
-    assert(msg.Tags.UserId, "❌[Init-Server] UserId in tags is required")
-    assert(type(msg.Tags.UserId) == "string", "❌[Init-Server] UserId in tags must be a string")
-    assert(#msg.Tags.UserId == 43, "❌[Init-Server] UserId in tags must be a valid transaction id")
-
-    assert(msg.Tags.Name, "❌[Init-Server] Name in tags is required")
-    assert(type(msg.Tags.Name) == "string", "❌[Init-Server] Name in tags must be a string")
-    assert(#msg.Tags.Name > 0, "❌[Init-Server] Name in tags must be a non-empty string")
-
-    assert(msg.Tags.Logo, "❌[Init-Server] Logo in tags is required")
-    assert(type(msg.Tags.Logo) == "string", "❌[Init-Server] Logo in tags must be a string")
-    assert(#msg.Tags.Logo > 0, "❌[Init-Server] Logo in tags must be a non-empty string")
-
-    ServerOwner = msg.Tags.UserId
-    Name = msg.Tags.Name
-    Logo = msg.Tags.Logo
-
-    Balances = { [ao.id] = 1 }
-    Ticker = "SRVR-" .. Name:sub(1, 4)
-
-    msg.reply({
-        Action = "Init-Server-Response",
-        Status = "200",
-    })
-end)
-
-Handlers.add("Update-Server-Src", function(msg)
-    assert(((msg.From == Subspace) or (msg.From == ServerOwner)), "❌[Update-Server-Src] Invalid authority")
-    assert(ServerOwner == "", "❌[Update-Server-Src] Server not initialized")
-
-    local srcTxId = msg.Data
-    assert(srcTxId, "❌[Update-Server-Src] TxId in Data is required")
-    assert(type(srcTxId) == "string", "❌[Update-Server-Src] TxId in Data must be a string")
-    assert(#srcTxId == 43, "❌[Update-Server-Src] TxId must be a valid transaction id")
-
-    msg.reply({
-        Action = "Update-Server-Src-Response",
-        Status = "500",
-        Data = json.encode({
-            error = "Method yet to be implemented"
-        })
-    })
-end)
-
 Handlers.add("Info", function(msg)
     local categories = SQLRead("SELECT * FROM categories ORDER BY orderId ASC")
     local channels = SQLRead("SELECT * FROM channels ORDER BY orderId ASC")
@@ -474,12 +428,13 @@ Handlers.add("Info", function(msg)
         Action = "Info-Response",
         Name = Name,
         Logo = Logo,
-        Owner = ServerOwner,
+        Owner_ = Owner,
         Categories = json.encode(categories),
         Channels = json.encode(channels),
         Roles = json.encode(roles),
         PublicServer = PublicServer,
         MemberCount = tostring(memberCount),
+        Version = Version,
         -- IGNORE REST
         Denomination = tostring(Denomination),
         Ticker = Ticker,
@@ -1604,7 +1559,7 @@ Handlers.add("Kick-Member", function(msg)
     end
 
     -- Cannot kick server owner
-    if ValidateCondition(targetUserId == ServerOwner, msg, {
+    if ValidateCondition(targetUserId == Owner, msg, {
             Status = "400",
             Data = json.encode({
                 error = "Cannot kick the server owner"
@@ -1667,7 +1622,7 @@ Handlers.add("Ban-Member", function(msg)
     end
 
     -- Cannot ban server owner
-    if ValidateCondition(targetUserId == ServerOwner, msg, {
+    if ValidateCondition(targetUserId == Owner, msg, {
             Status = "400",
             Data = json.encode({
                 error = "Cannot ban the server owner"
@@ -2172,7 +2127,7 @@ Handlers.add("Delete-Message", function(msg)
 
     -- Check if user is the author, server owner, or has manage messages permission
     local isAuthor = (message.authorId == userId)
-    local isOwner = (userId == ServerOwner)
+    local isOwner = (userId == Owner)
     local hasManagePermission = MemberHasPermission(member, Permissions.MANAGE_MESSAGES)
 
     if ValidateCondition(not isAuthor and not isOwner and not hasManagePermission, msg, {

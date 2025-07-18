@@ -48,7 +48,6 @@ export class BotManager {
 
             return botId;
         } catch (error) {
-            console.error('Failed to create bot:', error);
             return null;
         }
     }
@@ -65,7 +64,6 @@ export class BotManager {
             const data = this.connectionManager.parseOutput(res);
             return data ? data as BotInfo : null;
         } catch (error) {
-            console.error('Failed to get bot info:', error);
             return null;
         }
     }
@@ -89,7 +87,6 @@ export class BotManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to add bot to server:', error);
             return false;
         }
     }
@@ -107,7 +104,6 @@ export class BotManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to remove bot from server:', error);
             return false;
         }
     }
@@ -126,7 +122,6 @@ export class BotManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to subscribe bot to channel:', error);
             return false;
         }
     }
@@ -142,7 +137,6 @@ export class BotManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success !== false; // Consider success if no explicit failure
         } catch (error) {
-            console.error('Failed to update bot source:', error);
             return false;
         }
     }
@@ -160,7 +154,6 @@ export class BotManager {
             const data = this.connectionManager.parseOutput(res);
             return data ? data as Bot : null;
         } catch (error) {
-            console.error('Failed to anchor to bot:', error);
             return null;
         }
     }

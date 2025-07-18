@@ -4,8 +4,8 @@ json = require("json")
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = Subspace or Owner
-DmOwner = DmOwner or ""
+Subspace = "VDkbyJj9o67AtTaYregitjDgcrLWmrxMvKICbWR-kBA"
+Version = Version or "1.0.0"
 
 db = db or sqlite3.open_memory()
 
@@ -64,8 +64,8 @@ end
 
 ----------------------------------------------------------------------------
 
--- dmUserId is always the friendId with whom DmOwner is dming with
--- authorId can either be the DmOwner or the friendId
+-- dmUserId is always the friendId with whom Owner is dming with
+-- authorId can either be the Owber or the friendId
 db:exec([[
     CREATE TABLE IF NOT EXISTS messages (
         messageId INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,23 +90,17 @@ db:exec([[
 
 ----------------------------------------------------------------------------
 
-Handlers.once("Init-Dms", function(msg)
-    assert(msg.From == Subspace, "❌[auth error] sender not authorized to initialize the dm module")
-    assert(DmOwner == "", "❌[auth error] Dm module already initialized")
-    assert(msg.Tags.UserId, "❌[auth error] UserId in tags is required")
-    assert(type(msg.Tags.UserId) == "string", "❌[auth error] UserId in tags must be a string")
-    assert(#msg.Tags.UserId == 43, "❌[auth error] UserId in tags must be a valid transaction id")
-
-    DmOwner = msg.Tags.UserId
-
+Handlers.add("Info", function(msg)
     msg.reply({
-        Action = "Init-Dms-Response",
+        Action = "Info-Response",
         Status = "200",
+        Version = tostring(Version),
+        Owner_ = Owner
     })
 end)
 
 Handlers.add("Get-DMs", function(msg)
-    assert(DmOwner ~= "", "❌[auth error] Dm module not initialized")
+    assert(Owner ~= msg.From, "❌[auth error] Dm module not initialized")
 
     local dmUserId = VarOrNil(msg.Tags.FriendId)
     local limit = VarOrNil(msg.Tags.Limit)
@@ -166,7 +160,6 @@ end)
 -- msg forwarded by Profiles
 Handlers.add("Send-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to add a dm")
-    assert(DmOwner == "", "❌[auth error] Dm module not initialized")
 
     local authorId = msg["X-Origin"]
     local dmUserId = msg.Tags.FriendId
@@ -176,11 +169,11 @@ Handlers.add("Send-DM", function(msg)
     local timestamp = tonumber(msg.Timestamp)
     local messageTxId = msg["X-Origin-Id"]
 
-    -- Either authorId or dmUserId must be the DmOwner
-    if ValidateCondition(authorId ~= DmOwner and dmUserId ~= DmOwner, msg, {
+    -- Either authorId or dmUserId must be the Owner
+    if ValidateCondition(authorId ~= Owner and dmUserId ~= Owner, msg, {
             Status = "400",
             Data = json.encode({
-                error = "Either authorId or dmUserId must be the DmOwner"
+                error = "Either authorId or dmUserId must be the Owner"
             })
         }) then
         return
@@ -204,8 +197,8 @@ Handlers.add("Send-DM", function(msg)
         return
     end
 
-    -- if dmUserId is the DmOwner, then authorId is the friendId
-    if dmUserId == DmOwner then
+    -- if dmUserId is the Owner, then authorId is the friendId
+    if dmUserId == Owner then
         dmUserId = authorId
     end
 
@@ -242,14 +235,14 @@ Handlers.add("Send-DM", function(msg)
         dmUserId, authorId, content, attachments, replyTo, timestamp, messageTxId)
 
     -- send notification
-    if authorId ~= DmOwner then
+    if authorId ~= Owner then
         ao.send({
             Target = Subspace,
             Action = "Add-Notification",
             Tags = {
                 ServerOrDmId = ao.id,
                 FromUserId = authorId,
-                ForUserId = DmOwner,
+                ForUserId = Owner,
                 Source = "DM",
                 MessageTxId = messageTxId
             }
@@ -267,7 +260,6 @@ end)
 
 Handlers.add("Delete-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to delete a dm")
-    assert(DmOwner == "", "❌[auth error] Dm module not initialized")
 
     local messageId = VarOrNil(msg.Tags.MessageId)
     local dmUserId = VarOrNil(msg.Tags.FriendId)
@@ -300,16 +292,16 @@ Handlers.add("Delete-DM", function(msg)
         return
     end
 
-    if ValidateCondition(authorId ~= DmOwner and dmUserId ~= DmOwner, msg, {
+    if ValidateCondition(authorId ~= Owner and dmUserId ~= Owner, msg, {
             Status = "400",
             Data = json.encode({
-                error = "Either authorId or dmUserId must be the DmOwner"
+                error = "Either authorId or dmUserId must be the Owner"
             })
         }) then
         return
     end
 
-    if dmUserId == DmOwner then
+    if dmUserId == Owner then
         dmUserId = authorId
     end
 
@@ -341,7 +333,6 @@ end)
 
 Handlers.add("Edit-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to edit a dm")
-    assert(DmOwner == "", "❌[auth error] Dm module not initialized")
 
     local messageId = VarOrNil(msg.Tags.MessageId)
     local dmUserId = VarOrNil(msg.Tags.FriendId)
@@ -375,16 +366,16 @@ Handlers.add("Edit-DM", function(msg)
         return
     end
 
-    if ValidateCondition(authorId ~= DmOwner and dmUserId ~= DmOwner, msg, {
+    if ValidateCondition(authorId ~= Owner and dmUserId ~= Owner, msg, {
             Status = "400",
             Data = json.encode({
-                error = "Either authorId or dmUserId must be the DmOwner"
+                error = "Either authorId or dmUserId must be the Owner"
             })
         }) then
         return
     end
 
-    if dmUserId == DmOwner then
+    if dmUserId == Owner then
         dmUserId = authorId
     end
 

@@ -77,9 +77,12 @@ export interface MessagesResponse {
 }
 
 export class ServerManager {
-    constructor(private connectionManager: ConnectionManager) { }
+    constructor(private connectionManager: ConnectionManager) {
+    }
 
     async createServer(params: { name: string; logo?: string; description?: string }): Promise<string | null> {
+        const start = Date.now();
+
         try {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.CreateServer },
@@ -88,10 +91,11 @@ export class ServerManager {
 
             if (params.logo) tags.push({ name: "Logo", value: params.logo });
             if (params.description) tags.push({ name: "Description", value: params.description });
-
             const serverId = await this.connectionManager.spawn({ tags });
-            if (!serverId) return null;
 
+            if (!serverId) {
+                return null;
+            }
             // Initialize server with default setup
             await this.connectionManager.execLua({
                 processId: serverId,
@@ -99,9 +103,10 @@ export class ServerManager {
                 tags: [{ name: "Action", value: "Initialize" }]
             });
 
+            const duration = Date.now() - start;
             return serverId;
         } catch (error) {
-            console.error('Failed to create server:', error);
+            const duration = Date.now() - start;
             return null;
         }
     }
@@ -115,10 +120,10 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
+            const data = JSON.parse(this.connectionManager.parseOutput(res).Data);
+            console.log('data', data)
             return data ? data as Server : null;
         } catch (error) {
-            console.error('Failed to get server:', error);
             return null;
         }
     }
@@ -141,7 +146,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to update server:', error);
             return false;
         }
     }
@@ -159,7 +163,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data ? data as Member : null;
         } catch (error) {
-            console.error('Failed to get member:', error);
             return null;
         }
     }
@@ -176,7 +179,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data || [];
         } catch (error) {
-            console.error('Failed to get all members:', error);
             return [];
         }
     }
@@ -199,7 +201,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to update member:', error);
             return false;
         }
     }
@@ -217,7 +218,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to kick member:', error);
             return false;
         }
     }
@@ -235,7 +235,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to ban member:', error);
             return false;
         }
     }
@@ -253,7 +252,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to unban member:', error);
             return false;
         }
     }
@@ -277,7 +275,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to create category:', error);
             return false;
         }
     }
@@ -302,7 +299,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to update category:', error);
             return false;
         }
     }
@@ -320,7 +316,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to delete category:', error);
             return false;
         }
     }
@@ -344,7 +339,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to create channel:', error);
             return false;
         }
     }
@@ -368,7 +362,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to update channel:', error);
             return false;
         }
     }
@@ -386,7 +379,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to delete channel:', error);
             return false;
         }
     }
@@ -410,7 +402,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to create role:', error);
             return false;
         }
     }
@@ -435,7 +426,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to update role:', error);
             return false;
         }
     }
@@ -453,7 +443,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to delete role:', error);
             return false;
         }
     }
@@ -472,7 +461,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to assign role:', error);
             return false;
         }
     }
@@ -491,7 +479,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to unassign role:', error);
             return false;
         }
     }
@@ -515,7 +502,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to send message:', error);
             return false;
         }
     }
@@ -534,7 +520,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to edit message:', error);
             return false;
         }
     }
@@ -552,7 +537,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
         } catch (error) {
-            console.error('Failed to delete message:', error);
             return false;
         }
     }
@@ -570,7 +554,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data ? data as Message : null;
         } catch (error) {
-            console.error('Failed to get message:', error);
             return null;
         }
     }
@@ -594,7 +577,6 @@ export class ServerManager {
             const data = this.connectionManager.parseOutput(res);
             return data ? data as MessagesResponse : null;
         } catch (error) {
-            console.error('Failed to get messages:', error);
             return null;
         }
     }
