@@ -16,7 +16,7 @@ Sources = {
         Version = "1.0.0"
     },
     Server = {
-        Id = "rCTZTPzzAcqPf9VVOg3Khum-TIQ57PZpW5RJ8rRRbig",
+        Id = "iZlS4SDbBx1P-pOK8ctyP7aiFtFzoPZEeTPbWlZY1Gg",
         Version = "1.0.0"
     },
 }
@@ -297,58 +297,40 @@ Handlers.add("Create-Profile", function(msg)
         return
     end
 
-    -- verify if dm process is for the correct owner
-    if dmProcess then
-        if #dmProcess ~= 43 then
-            msg.reply({
-                Action = "Create-Profile-Response",
-                Status = "400",
-                Data = json.encode({
-                    error = "Invalid dm process"
-                })
+    if ValidateCondition(not dmProcess or #dmProcess ~= 43, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Dm process is required and must be a valid process id"
             })
-            return
-        end
-
-        Send({
-            Target = dmProcess,
-            Action = "Info",
         })
-        local infoRes = Receive({ Action = "Info-Response", From = dmProcess })
-        if infoRes.Status == "200" then
-            if infoRes.Tags.Owner_ == userId then
-                -- create profile
-                SQLWrite("INSERT INTO profiles (userId, dmProcess) VALUES (?, ?)", userId, dmProcess)
-            else
-                msg.reply({
-                    Action = "Create-Profile-Response",
-                    Status = "400",
-                    Data = json.encode({
-                        error = "Invalid dm process or owner mismatch"
-                    })
-                })
-                return
-            end
-        else
-            msg.reply({
-                Action = "Create-Profile-Response",
-                Status = "400",
-                Data = json.encode({
-                    error = "Invalid dm process or owner mismatch"
-                })
-            })
-            return
-        end
-    else
+    then
+        return
+    end
+
+    -- make sure that this dmProcess is not already in the database
+    local dmProcessExists = SQLRead("SELECT * FROM profiles WHERE dmProcess = ?", dmProcess)
+    if dmProcessExists and #dmProcessExists > 0 then
         msg.reply({
             Action = "Create-Profile-Response",
             Status = "400",
             Data = json.encode({
-                error = "Invalid dm process or owner mismatch"
+                error = "Dm process already exists"
             })
         })
         return
     end
+
+    -- create profile
+    SQLWrite("INSERT INTO profiles (userId, dmProcess) VALUES (?, ?)", userId, dmProcess)
+
+    msg.reply({
+        Action = "Create-Profile-Response",
+        Status = "200",
+        Data = json.encode({
+            success = "Profile created"
+        }),
+        ProfileId = dmProcess
+    })
 end)
 
 Handlers.add("Get-Profile", function(msg)
@@ -495,23 +477,15 @@ Handlers.add("Create-Server", function(msg)
         return
     end
 
-    -- verify if server process is for the correct owner
-    if serverProcess then
-        ao.send({
-            Target = serverProcess,
-            Action = "Info",
-        })
-
-        local infoRes = Receive({ Action = "Info-Response", From = serverProcess })
-        if ValidateCondition(infoRes.Tags.Status ~= "200" or infoRes.Tags.Owner_ ~= userId, msg, {
-                Status = "400",
-                Data = json.encode({
-                    error = "Invalid server process or owner mismatch"
-                })
+    -- make sure that this serverId is not already in the database
+    if ValidateCondition(ServerExists(serverProcess), msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Server already exists"
             })
-        then
-            return
-        end
+        })
+    then
+        return
     end
 
     SQLWrite("INSERT INTO servers (serverId, userId) VALUES (?, ?)", serverProcess, userId)

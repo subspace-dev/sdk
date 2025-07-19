@@ -84,29 +84,82 @@ export class ServerManager {
         const start = Date.now();
 
         try {
+            // Spawn a new process with server metadata
             const tags: Tag[] = [
-                { name: "Action", value: Constants.Actions.CreateServer },
-                { name: "Name", value: params.name }
+                { name: "Name", value: params.name },
+                { name: "Owner", value: this.connectionManager.owner },
+                { name: "Action", value: Constants.Actions.CreateServer }
             ];
 
             if (params.logo) tags.push({ name: "Logo", value: params.logo });
             if (params.description) tags.push({ name: "Description", value: params.description });
-            const serverId = await this.connectionManager.spawn({ tags });
+            // Generate ticker from server name (first 3-5 characters, uppercase)
+            const ticker = params.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 5).toUpperCase() || 'SRVR';
+            tags.push({ name: "Ticker", value: ticker });
 
+
+            const serverId = await this.connectionManager.spawn({ tags });
             if (!serverId) {
                 return null;
             }
-            // Initialize server with default setup
-            await this.connectionManager.execLua({
+
+            console.log("Server spawned:", serverId)
+
+            // Wait for sources to be available (retry up to 3 times)
+            for (let i = 0; i < 3; i++) {
+                if (this.connectionManager.sources?.Server?.Lua) break;
+                await new Promise(resolve => setTimeout(resolve, 1000 * i));
+            }
+
+            if (!this.connectionManager.sources?.Server?.Lua) {
+                throw new Error("Failed to get server source code");
+            }
+
+            // Replace template placeholders in the server source code
+            let serverSourceCode = this.connectionManager.sources.Server.Lua;
+
+
+            // Replace placeholders
+            serverSourceCode = serverSourceCode.replace('{NAME}', params.name);
+            serverSourceCode = serverSourceCode.replace('{LOGO}', params.logo || '');
+            serverSourceCode = serverSourceCode.replace('{TICKER}', ticker);
+
+            // Load server source code into the spawned process
+            const serverRes = await this.connectionManager.execLua({
                 processId: serverId,
-                code: `-- Server initialization code would go here`,
-                tags: [{ name: "Action", value: "Initialize" }]
+                code: serverSourceCode,
+                tags: []
             });
 
+            console.log("Server hydrated:", serverRes.id);
+
+            // Wait for server to initialize
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Register server with Subspace process
+            const res = await this.connectionManager.sendMessage({
+                processId: Constants.Subspace,
+                tags: [
+                    { name: "Action", value: Constants.Actions.CreateServer },
+                    { name: "ServerProcess", value: serverId }
+                ]
+            });
+
+            console.log("Registering server:", res)
+            const msg = this.connectionManager.parseOutput(res, {
+                hasMatchingTag: "Action",
+                hasMatchingTagValue: "Create-Server-Response"
+            });
+            const success = msg.Tags.Status === "200";
+            if (!success) {
+                throw new Error(msg.Data);
+            }
+
             const duration = Date.now() - start;
-            return serverId;
+            return msg.Tags.ServerId;
         } catch (error) {
             const duration = Date.now() - start;
+            console.error("Failed to create server:", error);
             return null;
         }
     }
@@ -120,9 +173,24 @@ export class ServerManager {
                 ]
             });
 
-            const data = JSON.parse(this.connectionManager.parseOutput(res).Data);
-            console.log('data', data)
-            return data ? data as Server : null;
+            const data = this.connectionManager.parseOutput(res, {
+                hasMatchingTag: "Action",
+                hasMatchingTagValue: "Info-Response"
+            });
+
+            const server: Server = {
+                serverId,
+                ownerId: data.Tags.Owner_,
+                name: data.Tags.Name,
+                logo: data.Tags.Logo,
+                description: data.Tags.Description,
+                memberCount: data.Tags.MemberCount,
+                channels: JSON.parse(data.Tags.Channels),
+                categories: JSON.parse(data.Tags.Categories),
+                roles: JSON.parse(data.Tags.Roles)
+            }
+
+            return server;
         } catch (error) {
             return null;
         }

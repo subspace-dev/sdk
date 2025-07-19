@@ -147,12 +147,21 @@ export class UserManager {
                 ]
             });
 
-            console.log("res", res)
-            const data = this.connectionManager.parseOutput(res);
-            console.log("data", data)
+            const data = this.connectionManager.parseOutput(res, {
+                hasMatchingTag: "Action",
+                hasMatchingTagValue: "Create-Profile-Response"
+            });
+
+            if (data.Tags.Status != "200") {
+                console.error("Failed to create profile", data)
+                return null
+            }
+
+            const profileId = data.Tags.ProfileId
+
             const duration = Date.now() - start;
 
-            return data?.profileId || null;
+            return profileId || null;
         } catch (error) {
             const duration = Date.now() - start;
             return null;

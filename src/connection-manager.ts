@@ -175,7 +175,7 @@ export class ConnectionManager {
         }
     }
 
-    async sendMessage({ processId, data, tags }: { processId: string, data?: string, tags: Tag[] }): Promise<MessageResult> {
+    async sendMessage({ processId, data, tags }: { processId: string, data?: string, tags: Tag[] }): Promise<MessageResult & { id: string }> {
         const start = Date.now();
 
         try {
@@ -187,7 +187,7 @@ export class ConnectionManager {
             }
             const messageId: string = await this.ao.message(args)
 
-            const res: MessageResult = await this.ao.result({
+            const res: MessageResult & { id: string } = await this.ao.result({
                 process: processId,
                 message: messageId,
             })
@@ -198,6 +198,8 @@ export class ConnectionManager {
             if (success) {
             } else {
             }
+
+            res.id = messageId;
 
             return res;
         } catch (error) {
@@ -244,7 +246,7 @@ export class ConnectionManager {
             throw new Error(`AO Error: ${res.Error}`)
         }
 
-        if (res.Output && res.Output.data) {
+        if (res.Output && res.Output.data && !hasMatchingTag && !hasMatchingTagValue) {
 
             try {
                 const parsed = JSON.parse(res.Output.data)
@@ -278,6 +280,15 @@ export class ConnectionManager {
             }
         } else {
             throw new Error("No messages found")
+        }
+
+        // translate from array of {name, value} to {name: value} object
+        if (returnMessage.Tags) {
+            const tagsObj: { [key: string]: string } = {};
+            for (const tag of returnMessage.Tags) {
+                tagsObj[tag.name] = tag.value;
+            }
+            returnMessage.Tags = tagsObj;
         }
 
         return returnMessage;

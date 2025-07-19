@@ -18,6 +18,7 @@ export const Constants = {
         GetProfile: 'Get-Profile',
         GetBulkProfile: 'Get-Bulk-Profile',
         CreateProfile: 'Create-Profile',
+        CreateProfileCheck: 'Create-Profile-Check',
         UpdateProfile: 'Update-Profile',
         GetOriginalId: 'Get-Original-Id',
         GetNotifications: 'Get-Notifications',
@@ -45,6 +46,7 @@ export const Constants = {
         GetServer: 'Get-Server',
         CreateServer: 'Create-Server',
         UpdateServer: 'Update-Server',
+        CreateServerCheck: 'Create-Server-Check',
 
         // Member actions
         GetMember: 'Get-Member',

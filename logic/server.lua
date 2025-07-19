@@ -398,31 +398,7 @@ Handlers.add("Info", function(msg)
     local channels = SQLRead("SELECT * FROM channels ORDER BY orderId ASC")
     local roles = SQLRead("SELECT * FROM roles ORDER BY orderId ASC")
 
-    local memberCount = #SQLRead("SELECT COUNT(*) as  FROM members")
-    -- local members = SQLRead("SELECT * FROM members")
-    -- local memberRoles = SQLRead("SELECT * FROM memberRoles")
-
-    -- Validate role permissions and fix any invalid ones
-    -- for _, role in ipairs(roles) do
-    --     if not PermissionIsValid(role.permissions) then
-    --         -- Log the issue and fix it
-    --         print("Warning: Role '" .. role.name .. "' has invalid permissions: " .. tostring(role.permissions))
-    --         role.permissions = Permissions.SEND_MESSAGES
-    --         SQLWrite("UPDATE roles SET permissions = ? WHERE roleId = ?", role.permissions, role.roleId)
-    --     end
-    -- end
-
-    -- local membersArranged = {}
-    -- for _, member in ipairs(members) do
-    --     membersArranged[member.userId] = {
-    --         nickname = member.nickname,
-    --         roles = {}
-    --     }
-    -- end
-    -- for _, memberRole in ipairs(memberRoles) do
-    --     -- add role to member
-    --     table.insert(membersArranged[memberRole.userId].roles, memberRole.roleId)
-    -- end
+    local memberCount = #SQLRead("SELECT COUNT(*) as memberCount FROM members")
 
     msg.reply({
         Action = "Info-Response",
@@ -432,9 +408,9 @@ Handlers.add("Info", function(msg)
         Categories = json.encode(categories),
         Channels = json.encode(channels),
         Roles = json.encode(roles),
-        PublicServer = PublicServer,
+        PublicServer = tostring(PublicServer),
         MemberCount = tostring(memberCount),
-        Version = Version,
+        Version = tostring(Version),
         -- IGNORE REST
         Denomination = tostring(Denomination),
         Ticker = Ticker,
