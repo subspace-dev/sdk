@@ -244,8 +244,8 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data || [];
+            const msg = this.connectionManager.parseOutput(res);
+            return JSON.parse(msg.Data) || [];
         } catch (error) {
             return [];
         }
@@ -556,7 +556,6 @@ export class ServerManager {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.SendMessage },
                 { name: "ChannelId", value: params.channelId },
-                { name: "Content", value: params.content }
             ];
 
             if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
@@ -564,6 +563,7 @@ export class ServerManager {
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
+                data: params.content,
                 tags
             });
 
@@ -642,7 +642,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
+            const data = JSON.parse(this.connectionManager.parseOutput(res).Data);
+            console.log("getMessages", data)
             return data ? data as MessagesResponse : null;
         } catch (error) {
             return null;
