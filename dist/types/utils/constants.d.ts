@@ -1,5 +1,6 @@
 export declare const Constants: {
     Subspace: string;
+    Authority: string;
     Scheduler: string;
     Module: string;
     Profiles: string;
@@ -8,6 +9,7 @@ export declare const Constants: {
         GetProfile: string;
         GetBulkProfile: string;
         CreateProfile: string;
+        CreateProfileCheck: string;
         UpdateProfile: string;
         GetOriginalId: string;
         GetNotifications: string;
@@ -29,6 +31,7 @@ export declare const Constants: {
         GetServer: string;
         CreateServer: string;
         UpdateServer: string;
+        CreateServerCheck: string;
         GetMember: string;
         GetAllMembers: string;
         UpdateMember: string;

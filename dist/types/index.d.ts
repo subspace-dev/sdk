@@ -14,7 +14,6 @@ export declare class Subspace {
     bot: BotManager;
     constructor(config?: ConnectionConfig);
     updateConfig(config: Partial<ConnectionConfig>): void;
-    switchCu(): void;
     getConnectionInfo(): {
         cuUrl: string;
         owner: string;
