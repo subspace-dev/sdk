@@ -13,7 +13,8 @@ export interface Server {
     members?: Member[];
     channels: Channel[];
     categories: Category[];
-    roles: Role[];
+    // roles: Role[];
+    roles: Record<string, Role>; // roleId -> role
     createdAt?: number;
 }
 
@@ -176,8 +177,13 @@ export class ServerManager {
                 memberCount: parseInt(data.Tags.MemberCount) || 0,
                 channels: JSON.parse(data.Tags.Channels),
                 categories: JSON.parse(data.Tags.Categories),
-                roles: JSON.parse(data.Tags.Roles)
+                roles: JSON.parse(data.Tags.Roles).reduce((acc: Record<string, Role>, role: Role) => {
+                    acc[role.roleId.toString()] = role;
+                    return acc;
+                }, {})
             }
+
+            console.log(server.roles);
 
             return server;
         });
@@ -213,7 +219,7 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
+            const data = JSON.parse(this.connectionManager.parseOutput(res).Tags.Member);
             return data ? data as Member : null;
         });
     }
