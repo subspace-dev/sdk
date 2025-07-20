@@ -10,6 +10,7 @@ export class Logger {
     private static instance: Logger;
     private logLevel: LogLevel = LogLevel.INFO;
     private prefix: string = '[Subspace SDK]';
+    private isFirstLog: boolean = true;
 
     private constructor() {
         // Set log level from environment or default
@@ -22,6 +23,16 @@ export class Logger {
             Logger.instance = new Logger();
         }
         return Logger.instance;
+    }
+
+    private showSDKHeader(): void {
+        if (this.isFirstLog) {
+            console.log('%c┌─────────────────────────────────────────────┐', 'color: #2196F3;');
+            console.log('%c│           🚀 SUBSPACE SDK LOGS 🚀           │', 'color: #2196F3; font-weight: bold;');
+            console.log('%c└─────────────────────────────────────────────┘', 'color: #2196F3;');
+            console.log('');
+            this.isFirstLog = false;
+        }
     }
 
     setLogLevel(level: LogLevel): void {
@@ -118,6 +129,68 @@ export class Logger {
             to: newValue
         });
     }
+
+    // Concise action logging for SDK operations
+    actionStart(action: string, input?: any): void {
+        this.showSDKHeader();
+
+        // Start a collapsed group for the action
+        console.groupCollapsed(
+            `%c🚀 ${action}`,
+            'color: #2196F3; font-weight: bold; font-size: 12px;'
+        );
+
+        if (input && Object.keys(input).length > 0) {
+            console.log('%cInput:', 'color: #4CAF50; font-weight: bold;', input);
+        }
+
+        console.groupEnd();
+    }
+
+    actionResult(action: string, output?: any, success: boolean = true, duration?: number): void {
+        const statusIcon = success ? '✅' : '❌';
+        const statusText = success ? 'SUCCESS' : 'FAILED';
+        const statusColor = success ? '#4CAF50' : '#F44336';
+        const durationText = duration ? `${duration}ms` : '';
+
+        // Start a collapsed group for the result
+        console.groupCollapsed(
+            `%c${statusIcon} ${action} result%c [${statusText}]%c ${durationText}`,
+            `color: ${statusColor}; font-weight: bold; font-size: 12px;`,
+            `color: ${statusColor}; font-size: 11px;`,
+            'color: #666; font-size: 10px; font-style: italic;'
+        );
+
+        if (output !== undefined && output !== null) {
+            const outputLabel = success ? 'Result:' : 'Error Details:';
+            const outputColor = success ? '#2196F3' : '#F44336';
+            console.log(`%c${outputLabel}`, `color: ${outputColor}; font-weight: bold;`, output);
+        }
+
+        console.groupEnd();
+    }
+
+    actionError(action: string, error: any, duration?: number): void {
+        const errorStr = error instanceof Error ? error.message : String(error);
+        const durationText = duration ? `${duration}ms` : '';
+
+        // Start a collapsed group for the error
+        console.groupCollapsed(
+            `%c❌ ${action} result%c [FAILED]%c ${durationText}`,
+            'color: #F44336; font-weight: bold; font-size: 12px;',
+            'color: #F44336; font-size: 11px;',
+            'color: #666; font-size: 10px; font-style: italic;'
+        );
+
+        console.log('%cError:', 'color: #F44336; font-weight: bold;', errorStr);
+
+        if (error instanceof Error && error.stack) {
+            console.log('%cStack Trace:', 'color: #FF9800; font-weight: bold;');
+            console.log(error.stack);
+        }
+
+        console.groupEnd();
+    }
 }
 
 // Export singleton instance
@@ -130,6 +203,30 @@ export function measureTime<T>(fn: () => Promise<T>): Promise<{ result: T; durat
         result,
         duration: Date.now() - start
     }));
+}
+
+// Helper function to wrap operations with action logging
+export async function loggedAction<T>(
+    action: string,
+    input: any,
+    operation: () => Promise<T>
+): Promise<T> {
+    const logger = Logger.getInstance();
+    const startTime = Date.now();
+
+    // Show action start
+    logger.actionStart(action, input);
+
+    try {
+        const result = await operation();
+        const duration = Date.now() - startTime;
+        logger.actionResult(action, result, true, duration);
+        return result;
+    } catch (error) {
+        const duration = Date.now() - startTime;
+        logger.actionError(action, error, duration);
+        throw error;
+    }
 }
 
 // Decorator for automatic operation logging

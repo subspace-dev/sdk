@@ -8,15 +8,15 @@ Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 
 Sources = {
     Bot = {
-        Id = "RWv6wuTXNbY3mNlE1sWXC7ZRo7eHSAl_Pq0ogaClEa4",
+        Id = "Jq-Fizuy60A0byfQXFVGbMlSeBDV7ehq7CClbtbr5J4",
         Version = "1.0.0"
     },
     Dm = {
-        Id = "emOxhkORaBoT2ZKbhYMQHYyuJahugx7ohR-wNhjjR8Q",
+        Id = "-8CKRs65Kjjxg5iCDlVPJbvC3pi05FsCzunAIbVU6qg",
         Version = "1.0.0"
     },
     Server = {
-        Id = "iZlS4SDbBx1P-pOK8ctyP7aiFtFzoPZEeTPbWlZY1Gg",
+        Id = "BG8lJDO-X_RpJwz_au311KXnGKL9h6AVZY07hevS204",
         Version = "1.0.0"
     },
 }
@@ -526,22 +526,14 @@ Handlers.add("Update-Server", function(msg)
     })
 end)
 
-Handlers.add("Join-Server", function(msg)
-    local userId = msg.From
-    userId = GetOriginalId(userId)
-    local serverId = msg.Tags.ServerId
 
-    local profile = GetProfile(userId)
-    if ValidateCondition(not profile, msg, {
-            Status = "404",
-            Data = json.encode({
-                error = "Profile not found"
-            })
-        })
-    then
-        return
-    end
 
+-- Handler for when a server notifies us that a user has joined
+Handlers.add("User-Joined-Server", function(msg)
+    local serverId = msg.From
+    local userId = VarOrNil(msg.Tags.UserId)
+
+    -- Validate that the message comes from a known server
     if ValidateCondition(not ServerExists(serverId), msg, {
             Status = "404",
             Data = json.encode({
@@ -552,23 +544,27 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    if ValidateCondition(UserInServer(userId, serverId), msg, {
+    if ValidateCondition(not userId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "User already in server"
+                error = "UserId is required"
             })
         })
     then
         return
     end
 
-    if ValidateCondition(not ServerIsPublic(serverId), msg, {
-            Status = "400",
+    userId = GetOriginalId(userId)
+
+    -- Check if user already in server
+    if UserInServer(userId, serverId) then
+        msg.reply({
+            Action = "User-Joined-Server-Response",
+            Status = "200",
             Data = json.encode({
-                error = "Server is not public, ask the server admins to update the server settings"
+                message = "User already in server"
             })
         })
-    then
         return
     end
 
@@ -585,40 +581,22 @@ Handlers.add("Join-Server", function(msg)
     -- Resequence to ensure clean ordering
     ResequenceUserServers(userId)
 
-    profile.serversJoined = SQLRead("SELECT * FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", userId)
-
-    -- Send message to server to add the user to the server
-    ao.send({
-        Target = serverId,
-        Action = "Join-Server",
-        Tags = {
-            UserId = userId
-        }
-    })
-
     msg.reply({
-        Action = "Join-Server-Response",
+        Action = "User-Joined-Server-Response",
         Status = "200",
-        Data = json.encode(profile)
+        Data = json.encode({
+            message = "User added to server"
+        })
     })
 end)
 
-Handlers.add("Leave-Server", function(msg)
-    local userId = msg.From
-    userId = GetOriginalId(userId)
-    local serverId = msg.Tags.ServerId
+-- Handler for when a server notifies us that a user has left
+Handlers.add("User-Left-Server", function(msg)
+    local serverId = msg.From
+    local userId = VarOrNil(msg.Tags.UserId)
+    local reason = VarOrNil(msg.Tags.Reason) -- "left", "kicked", "banned"
 
-    local profile = GetProfile(userId)
-    if ValidateCondition(not profile, msg, {
-            Status = "404",
-            Data = json.encode({
-                error = "Profile not found"
-            })
-        })
-    then
-        return
-    end
-
+    -- Validate that the message comes from a known server
     if ValidateCondition(not ServerExists(serverId), msg, {
             Status = "404",
             Data = json.encode({
@@ -629,13 +607,27 @@ Handlers.add("Leave-Server", function(msg)
         return
     end
 
-    if ValidateCondition(not UserInServer(userId, serverId), msg, {
+    if ValidateCondition(not userId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "User not in server"
+                error = "UserId is required"
             })
         })
     then
+        return
+    end
+
+    userId = GetOriginalId(userId)
+
+    -- Check if user is actually in the server
+    if not UserInServer(userId, serverId) then
+        msg.reply({
+            Action = "User-Left-Server-Response",
+            Status = "200",
+            Data = json.encode({
+                message = "User was not in server"
+            })
+        })
         return
     end
 
@@ -644,20 +636,13 @@ Handlers.add("Leave-Server", function(msg)
     -- Resequence to ensure clean ordering after removal
     ResequenceUserServers(userId)
 
-    profile.serversJoined = SQLRead("SELECT * FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", userId)
-
-    ao.send({
-        Action = "Leave-Server",
-        Target = serverId,
-        Tags = {
-            UserId = userId
-        }
-    })
-
     msg.reply({
-        Action = "Leave-Server-Response",
+        Action = "User-Left-Server-Response",
         Status = "200",
-        Data = json.encode(profile)
+        Data = json.encode({
+            message = "User removed from server",
+            reason = reason or "left"
+        })
     })
 end)
 
@@ -805,37 +790,7 @@ Handlers.add("Update-Server-Order", function(msg)
     end
 end)
 
--- Message from server for when a user is Kicked
-Handlers.add("Kick-Member", function(msg)
-    local serverId = msg.From
-    local initiatorUserId = msg["X-Origin"]
-    local targetUserId = msg.Tags.TargetUserId
 
-    SQLWrite("DELETE FROM serversJoined WHERE userId = ? AND serverId = ?", targetUserId, serverId)
-    profile.serversJoined = SQLRead("SELECT * FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", targetUserId)
-
-    msg.reply({
-        Action = "Kick-Member-Response",
-        Status = "200",
-        Data = json.encode(profile)
-    })
-end)
-
--- Message from server for when a user is Banned
-Handlers.add("Ban-Member", function(msg)
-    local serverId = msg.From
-    local initiatorUserId = msg["X-Origin"]
-    local targetUserId = msg.Tags.TargetUserId
-
-    SQLWrite("DELETE FROM serversJoined WHERE userId = ? AND serverId = ?", targetUserId, serverId)
-    profile.serversJoined = SQLRead("SELECT * FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", targetUserId)
-
-    msg.reply({
-        Action = "Ban-Member-Response",
-        Status = "200",
-        Data = json.encode(profile)
-    })
-end)
 
 ----------------------------------------------------------------------------
 --- FRIENDS

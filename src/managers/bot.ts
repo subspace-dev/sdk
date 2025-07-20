@@ -1,5 +1,6 @@
 import { ConnectionManager } from "../connection-manager";
 import { Constants } from "../utils/constants";
+import { loggedAction } from "../utils/logger";
 import type { Tag } from "../types/ao";
 
 export interface Bot {
@@ -26,7 +27,7 @@ export class BotManager {
     constructor(private connectionManager: ConnectionManager) { }
 
     async createBot(params: { name: string; description?: string; source?: string }): Promise<string | null> {
-        try {
+        return loggedAction('➕ creating bot', params, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.CreateBot },
                 { name: "Name", value: params.name }
@@ -35,7 +36,7 @@ export class BotManager {
             if (params.description) tags.push({ name: "Description", value: params.description });
 
             const botId = await this.connectionManager.spawn({ tags });
-            if (!botId) return null;
+            if (!botId) throw new Error("Failed to spawn bot process");
 
             // Initialize bot with source code if provided
             if (params.source) {
@@ -47,13 +48,11 @@ export class BotManager {
             }
 
             return botId;
-        } catch (error) {
-            return null;
-        }
+        });
     }
 
     async getBot(botId: string): Promise<BotInfo | null> {
-        try {
+        return loggedAction('🔍 getting bot info', { botId }, async () => {
             const res = await this.connectionManager.dryrun({
                 processId: botId,
                 tags: [
@@ -63,13 +62,11 @@ export class BotManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data ? data as BotInfo : null;
-        } catch (error) {
-            return null;
-        }
+        });
     }
 
     async addBotToServer(params: { serverId: string; botId: string; permissions?: any }): Promise<boolean> {
-        try {
+        return loggedAction('➕ adding bot to server', params, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.AddBot },
                 { name: "BotId", value: params.botId }
@@ -86,13 +83,11 @@ export class BotManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async removeBotFromServer(params: { serverId: string; botId: string }): Promise<boolean> {
-        try {
+        return loggedAction('🗑️ removing bot from server', params, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: params.serverId,
                 tags: [
@@ -103,13 +98,11 @@ export class BotManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async subscribeBotToChannel(params: { botId: string; serverId: string; channelId: string }): Promise<boolean> {
-        try {
+        return loggedAction('🔔 subscribing bot to channel', params, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: params.serverId,
                 tags: [
@@ -121,13 +114,11 @@ export class BotManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async updateBotSource(botId: string, source: string): Promise<boolean> {
-        try {
+        return loggedAction('✏️ updating bot source', { botId, sourceLength: source.length }, async () => {
             const res = await this.connectionManager.execLua({
                 processId: botId,
                 code: source,
@@ -136,13 +127,11 @@ export class BotManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success !== false; // Consider success if no explicit failure
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async anchorToBot(anchorId: string): Promise<Bot | null> {
-        try {
+        return loggedAction('⚓ anchoring to bot', { anchorId }, async () => {
             const res = await this.connectionManager.dryrun({
                 processId: Constants.Subspace,
                 tags: [
@@ -153,8 +142,6 @@ export class BotManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data ? data as Bot : null;
-        } catch (error) {
-            return null;
-        }
+        });
     }
 } 

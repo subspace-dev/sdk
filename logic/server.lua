@@ -154,6 +154,14 @@ if SQLRead("SELECT COUNT(*) as chanCount FROM channels")[1].chanCount == 0 then
         "General", 1, 1)
 end
 
+-- create default role if no roles exist
+-- The first role created will have roleId 1 and be the default role
+-- DEFAULT ROLE POLICY:
+-- - roleId 1 is always the default role that ALL members must have
+-- - It cannot be deleted from the server
+-- - It cannot be removed from any member
+-- - It starts with SEND_MESSAGES permission by default, but can be updated by role managers
+-- - All new members automatically get this role when joining
 SubscribedBots = {}
 
 Permissions = {
@@ -171,6 +179,11 @@ Permissions = {
     ATTACHMENTS = 1 << 11,     -- 2048
     MANAGE_BOTS = 1 << 12,     -- 4096
 }
+
+if SQLRead("SELECT COUNT(*) as roleCount FROM roles")[1].roleCount == 0 then
+    SQLWrite("INSERT INTO roles (name, orderId, color, permissions) VALUES (?, ?, ?, ?)",
+        "everyone", 1, "#696969", Permissions.SEND_MESSAGES)
+end
 
 ----------------------------------------------------------------------------
 --- HELPERS
@@ -314,6 +327,64 @@ function HasSpecificPermission(permissions, specificPermission)
     return permissions & specificPermission == specificPermission
 end
 
+-- Get the default role for the server (roleId 1 is always the default role)
+function GetDefaultRole()
+    return SQLRead("SELECT * FROM roles WHERE roleId = 1")[1]
+end
+
+-- Ensure all members have the default role (roleId 1)
+-- This function can be called to fix any inconsistencies
+function EnsureAllMembersHaveDefaultRole()
+    local defaultRole = GetDefaultRole()
+    if not defaultRole then
+        return 0 -- No default role exists
+    end
+
+    local members = SQLRead("SELECT userId FROM members")
+    local membersUpdated = 0
+
+    for _, member in ipairs(members) do
+        -- Check if member already has default role
+        local hasDefaultRole = SQLRead("SELECT * FROM memberRoles WHERE userId = ? AND roleId = 1", member.userId)
+        if #hasDefaultRole == 0 then
+            -- Assign default role to member
+            local rows = SQLWrite("INSERT INTO memberRoles (userId, roleId) VALUES (?, 1)", member.userId)
+            if rows == 1 then
+                membersUpdated = membersUpdated + 1
+            end
+        end
+    end
+
+    return membersUpdated
+end
+
+-- Check if a member can send messages in a specific channel
+function CanMemberSendMessagesInChannel(member, channel)
+    if not member or not channel then
+        return false
+    end
+
+    -- Rule 1: If channel.allowMessaging is nil, fallback to permission check
+    if channel.allowMessaging == nil then
+        return MemberHasPermission(member, Permissions.SEND_MESSAGES)
+    end
+
+    -- Rule 2: If channel.allowMessaging is 1, allow everyone to message
+    if channel.allowMessaging == 1 then
+        return true
+    end
+
+    -- Rule 3: If channel.allowMessaging is 0, only allow members with manage channel permissions and above
+    if channel.allowMessaging == 0 then
+        return MemberHasPermission(member, Permissions.MANAGE_CHANNELS) or
+            MemberHasPermission(member, Permissions.ADMINISTRATOR) or
+            member.userId == Owner
+    end
+
+    -- Default fallback (shouldn't reach here normally)
+    return false
+end
+
 -- Helper function to resequence channels within a specific category or uncategorized channels
 function ResequenceChannels(categoryId)
     local channels
@@ -398,7 +469,7 @@ Handlers.add("Info", function(msg)
     local channels = SQLRead("SELECT * FROM channels ORDER BY orderId ASC")
     local roles = SQLRead("SELECT * FROM roles ORDER BY orderId ASC")
 
-    local memberCount = #SQLRead("SELECT COUNT(*) as memberCount FROM members")
+    local memberCount = SQLRead("SELECT COUNT(*) as memberCount FROM members")[1].memberCount
 
     msg.reply({
         Action = "Info-Response",
@@ -451,34 +522,78 @@ end)
 ---------------------
 
 Handlers.add("Join-Server", function(msg)
-    -- this will always be sent from the profiles process
-    assert(msg.From == Subspace, "❌[Join-Server] Invalid authority")
-    local userId = VarOrNil(msg.Tags.UserId)
-    assert(userId, "❌[Join-Server] UserId is required")
+    local userId = msg.From
 
-    local member = GetMember(userId)
-    if ValidateCondition(member, msg, {
-            Status = "200",
+    -- Check if server is public (if private, only allow if invited/approved)
+    if ValidateCondition(not PublicServer, msg, {
+            Status = "400",
             Data = json.encode({
-                message = "User is already in the server"
+                error = "Server is not public, ask the server admins to update the server settings"
             })
         }) then
         return
     end
 
-    SQLWrite("INSERT INTO members (userId) VALUES (?)", userId)
+    local member = GetMember(userId)
+    if ValidateCondition(member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User is already in the server"
+            })
+        }) then
+        return
+    end
 
-    msg.reply({
-        Action = "Join-Server-Response",
-        Status = "200",
-    })
+    -- Begin transaction
+    db:exec("BEGIN TRANSACTION")
+    local success = true
+
+    -- Add user to server members
+    local rows = SQLWrite("INSERT INTO members (userId) VALUES (?)", userId)
+    if rows ~= 1 then
+        success = false
+    end
+
+    -- Assign default role to new member
+    local defaultRole = GetDefaultRole()
+    if success and defaultRole then
+        local roleRows = SQLWrite("INSERT INTO memberRoles (userId, roleId) VALUES (?, ?)", userId, defaultRole.roleId)
+        if roleRows ~= 1 then
+            success = false
+        end
+    end
+
+    if success then
+        db:exec("COMMIT")
+
+        -- Notify subspace that user has joined
+        ao.send({
+            Target = Subspace,
+            Action = "User-Joined-Server",
+            Tags = {
+                UserId = userId,
+                ServerId = ao.id
+            }
+        })
+
+        msg.reply({
+            Action = "Join-Server-Response",
+            Status = "200",
+        })
+    else
+        db:exec("ROLLBACK")
+        msg.reply({
+            Action = "Join-Server-Response",
+            Status = "500",
+            Data = json.encode({
+                error = "Failed to join server"
+            })
+        })
+    end
 end)
 
 Handlers.add("Leave-Server", function(msg)
-    -- this will always be sent from the profiles process
-    assert(msg.From == Subspace, "❌[Leave-Server] Invalid authority")
-    local userId = VarOrNil(msg.Tags.UserId)
-    assert(userId, "❌[Leave-Server] UserId is required")
+    local userId = msg.From
 
     local member = GetMember(userId)
     if ValidateCondition(not member, msg, {
@@ -490,10 +605,56 @@ Handlers.add("Leave-Server", function(msg)
         return
     end
 
-    msg.reply({
-        Action = "Leave-Server-Response",
-        Status = "200",
-    })
+    -- Cannot leave if user is the server owner
+    if ValidateCondition(userId == Owner, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Server owner cannot leave the server"
+            })
+        }) then
+        return
+    end
+
+    -- Begin transaction
+    db:exec("BEGIN TRANSACTION")
+    local success = true
+
+    -- Remove member roles
+    local rolesDeleted = SQLWrite("DELETE FROM memberRoles WHERE userId = ?", userId)
+
+    -- Remove member
+    local rows = SQLWrite("DELETE FROM members WHERE userId = ?", userId)
+    if rows ~= 1 then
+        success = false
+    end
+
+    if success then
+        db:exec("COMMIT")
+
+        -- Notify subspace that user has left
+        ao.send({
+            Target = Subspace,
+            Action = "User-Left-Server",
+            Tags = {
+                UserId = userId,
+                ServerId = ao.id
+            }
+        })
+
+        msg.reply({
+            Action = "Leave-Server-Response",
+            Status = "200",
+        })
+    else
+        db:exec("ROLLBACK")
+        msg.reply({
+            Action = "Leave-Server-Response",
+            Status = "500",
+            Data = json.encode({
+                error = "Failed to leave server"
+            })
+        })
+    end
 end)
 
 Handlers.add("Update-Server", function(msg)
@@ -1261,6 +1422,8 @@ Handlers.add("Update-Role", function(msg)
         return
     end
 
+
+
     -- Begin transaction for atomic updates
     db:exec("BEGIN TRANSACTION")
     local success = true
@@ -1346,6 +1509,16 @@ Handlers.add("Delete-Role", function(msg)
             Status = "400",
             Data = json.encode({
                 error = "Role not found"
+            })
+        }) then
+        return
+    end
+
+    -- Prevent deletion of default role (roleId 1)
+    if ValidateCondition(roleId == 1, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Cannot delete the default role"
             })
         }) then
         return
@@ -1561,7 +1734,16 @@ Handlers.add("Kick-Member", function(msg)
     if success then
         db:exec("COMMIT")
 
-        msg.forward(Subspace)
+        -- Notify subspace that user was kicked
+        ao.send({
+            Target = Subspace,
+            Action = "User-Left-Server",
+            Tags = {
+                UserId = targetUserId,
+                ServerId = ao.id,
+                Reason = "kicked"
+            }
+        })
 
         msg.reply({
             Action = "Kick-Member-Response",
@@ -1629,7 +1811,16 @@ Handlers.add("Ban-Member", function(msg)
         if success then
             db:exec("COMMIT")
 
-            msg.forward(Subspace)
+            -- Notify subspace that user was banned
+            ao.send({
+                Target = Subspace,
+                Action = "User-Left-Server",
+                Tags = {
+                    UserId = targetUserId,
+                    ServerId = ao.id,
+                    Reason = "banned"
+                }
+            })
 
             msg.reply({
                 Action = "Ban-Member-Response",
@@ -1822,6 +2013,16 @@ Handlers.add("Unassign-Role", function(msg)
         return
     end
 
+    -- Prevent removal of default role (roleId 1) from any member
+    if ValidateCondition(roleId == 1, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Cannot remove the default role from members. All members must have the default role."
+            })
+        }) then
+        return
+    end
+
     -- Check role hierarchy - different logic for self vs others
     local canManageRole = false
     local errorMessage = ""
@@ -1923,22 +2124,21 @@ Handlers.add("Send-Message", function(msg)
         return
     end
 
-    local hasPermission = MemberHasPermission(member, Permissions.SEND_MESSAGES)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to send messages"
-            })
-        }) then
-        return
-    end
-
-    -- Check if channel exists
     local channel = SQLRead("SELECT * FROM channels WHERE channelId = ?", channelId)[1]
     if ValidateCondition(not channel, msg, {
             Status = "400",
             Data = json.encode({
                 error = "Channel not found"
+            })
+        }) then
+        return
+    end
+
+    local canSendMessages = CanMemberSendMessagesInChannel(member, channel)
+    if ValidateCondition(not canSendMessages, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User does not have permission to send messages in this channel"
             })
         }) then
         return
@@ -2287,6 +2487,9 @@ end
 
 -- Initialize database and validate permissions
 ValidateExistingRolePermissions()
+
+-- Ensure all existing members have the default role
+EnsureAllMembersHaveDefaultRole()
 
 ----------------------------------------------------------------------------
 

@@ -1,5 +1,6 @@
 import { ConnectionManager } from "../connection-manager";
 import { Constants } from "../utils/constants";
+import { loggedAction } from "../utils/logger";
 import type { Tag } from "../types/ao";
 
 export interface Profile {
@@ -50,9 +51,7 @@ export class UserManager {
     constructor(private connectionManager: ConnectionManager) { }
 
     async getProfile(userId: string): Promise<Profile | null> {
-        const start = Date.now();
-
-        try {
+        return loggedAction('🔍 getting profile', { userId }, async () => {
             const res = await this.connectionManager.dryrun({
                 processId: Constants.Subspace,
                 tags: [
@@ -67,27 +66,23 @@ export class UserManager {
                 if (data.error) throw new Error(data.error);
                 return data as Profile;
             } else {
+                // Handle special case for owner creating new profile
+                if (userId == this.connectionManager.owner) {
+                    console.info("profile not found, creating new")
+                    const profileId = await this.createProfile()
+                    if (profileId) {
+                        return this.getProfile(userId)
+                    } else {
+                        return null
+                    }
+                }
                 return null;
             }
-        } catch (error) {
-            console.error(error)
-            console.info(userId, this.connectionManager.owner)
-            if (userId == this.connectionManager.owner) {
-                console.info("profile not found, creating new")
-                const profileId = await this.createProfile()
-                if (profileId) {
-                    return this.getProfile(userId)
-                } else {
-                    return null
-                }
-            }
-            const duration = Date.now() - start;
-            return null;
-        }
+        });
     }
 
     async getBulkProfiles(userIds: string[]): Promise<Profile[]> {
-        try {
+        return loggedAction('🔍 getting bulk profiles', { userCount: userIds.length }, async () => {
             const res = await this.connectionManager.dryrun({
                 processId: Constants.Subspace,
                 tags: [
@@ -98,16 +93,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data || [];
-        } catch (error) {
-            return [];
-        }
+        });
     }
 
     async createProfile(): Promise<string | null> {
-        const start = Date.now();
-
-        try {
-
+        return loggedAction('➕ creating profile', {}, async () => {
             // spawn dm process
             const dmProcess = await this.connectionManager.spawn({
                 tags: [
@@ -115,9 +105,6 @@ export class UserManager {
                     { name: "Owner", value: this.connectionManager.owner }
                 ]
             })
-
-            console.log("DmProcess:", dmProcess)
-
 
             // retry 3 times to wait for this.connectionManager.sources.Dm.Lua to populate
             for (let i = 0; i < 3; i++) {
@@ -134,8 +121,6 @@ export class UserManager {
                 code: this.connectionManager.sources.Dm.Lua,
                 tags: []
             })
-            console.log("Hydrate DM:", dmRes.id)
-
             // wait 1.5 seconds for dm process to finish
             await new Promise(resolve => setTimeout(resolve, 1500))
 
@@ -154,22 +139,16 @@ export class UserManager {
 
             if (data.Tags.Status != "200") {
                 console.error("Failed to create profile", data)
-                return null
+                throw new Error("Failed to create profile: " + data.Data)
             }
 
             const profileId = data.Tags.ProfileId
-
-            const duration = Date.now() - start;
-
             return profileId || null;
-        } catch (error) {
-            const duration = Date.now() - start;
-            return null;
-        }
+        });
     }
 
     async updateProfile(params: { pfp?: string; displayName?: string; bio?: string; banner?: string }): Promise<boolean> {
-        try {
+        return loggedAction('✏️ updating profile', params, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateProfile }
             ];
@@ -186,13 +165,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async getNotifications(userId: string): Promise<Notification[]> {
-        try {
+        return loggedAction('🔍 getting notifications', { userId }, async () => {
             const res = await this.connectionManager.dryrun({
                 processId: Constants.Subspace,
                 tags: [
@@ -203,13 +180,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data || [];
-        } catch (error) {
-            return [];
-        }
+        });
     }
 
     async sendFriendRequest(userId: string): Promise<boolean> {
-        try {
+        return loggedAction('📤 sending friend request', { userId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
@@ -220,13 +195,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async acceptFriendRequest(userId: string): Promise<boolean> {
-        try {
+        return loggedAction('✅ accepting friend request', { userId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
@@ -237,13 +210,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async rejectFriendRequest(userId: string): Promise<boolean> {
-        try {
+        return loggedAction('❌ rejecting friend request', { userId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
@@ -254,13 +225,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async removeFriend(userId: string): Promise<boolean> {
-        try {
+        return loggedAction('🗑️ removing friend', { userId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
@@ -271,13 +240,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async getDMs(dmProcessId: string, params: { limit?: number; before?: string; after?: string } = {}): Promise<DMResponse | null> {
-        try {
+        return loggedAction('🔍 getting DMs', { dmProcessId, limit: params.limit }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.GetDMs }
             ];
@@ -293,13 +260,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data ? data as DMResponse : null;
-        } catch (error) {
-            return null;
-        }
+        });
     }
 
     async sendDM(dmProcessId: string, params: { content: string; attachments?: string; replyTo?: number }): Promise<boolean> {
-        try {
+        return loggedAction('📤 sending DM', { dmProcessId, content: params.content.substring(0, 100) + (params.content.length > 100 ? '...' : '') }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.SendDM },
                 { name: "Content", value: params.content }
@@ -315,13 +280,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async editDM(dmProcessId: string, params: { messageId: string; content: string }): Promise<boolean> {
-        try {
+        return loggedAction('✏️ editing DM', { dmProcessId, messageId: params.messageId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: dmProcessId,
                 tags: [
@@ -333,13 +296,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async deleteDM(dmProcessId: string, messageId: string): Promise<boolean> {
-        try {
+        return loggedAction('🗑️ deleting DM', { dmProcessId, messageId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: dmProcessId,
                 tags: [
@@ -350,47 +311,41 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async joinServer(serverId: string): Promise<boolean> {
-        try {
+        return loggedAction('➡️ joining server (user)', { serverId }, async () => {
+            // Send join request directly to the server process
             const res = await this.connectionManager.sendMessage({
-                processId: Constants.Subspace,
+                processId: serverId,
                 tags: [
-                    { name: "Action", value: Constants.Actions.JoinServer },
-                    { name: "ServerId", value: serverId }
+                    { name: "Action", value: Constants.Actions.JoinServer }
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Join-Server-Response" });
+            return data?.Tags.Status === "200";
+        });
     }
 
     async leaveServer(serverId: string): Promise<boolean> {
-        try {
+        return loggedAction('⬅️ leaving server (user)', { serverId }, async () => {
+            // Send leave request directly to the server process
             const res = await this.connectionManager.sendMessage({
-                processId: Constants.Subspace,
+                processId: serverId,
                 tags: [
-                    { name: "Action", value: Constants.Actions.LeaveServer },
-                    { name: "ServerId", value: serverId }
+                    { name: "Action", value: Constants.Actions.LeaveServer }
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Leave-Server-Response" });
+            return data?.Tags.Status === "200";
+        });
     }
 
     async addDelegation(): Promise<boolean> {
-        try {
+        return loggedAction('➕ adding delegation', {}, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
@@ -400,13 +355,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async removeDelegation(): Promise<boolean> {
-        try {
+        return loggedAction('🗑️ removing delegation', {}, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
@@ -416,13 +369,11 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 
     async removeAllDelegations(): Promise<boolean> {
-        try {
+        return loggedAction('🗑️ removing all delegations', {}, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
                 tags: [
@@ -432,8 +383,6 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res);
             return data?.success === true;
-        } catch (error) {
-            return false;
-        }
+        });
     }
 } 

@@ -1,5 +1,6 @@
 import { connect, createDataItemSigner } from "@permaweb/aoconnect"
 import { Constants } from "./utils/constants";
+import { loggedAction } from "./utils/logger";
 import { ArweaveSigner, createData, DataItem } from "@dha-team/arbundles"
 import type { JWKInterface } from "arweave/web/lib/wallet";
 import type { Tag, MessageResult, AoSigner } from "./types/ao";
@@ -117,9 +118,7 @@ export class ConnectionManager {
     }
 
     async spawn({ tags }: { tags: Tag[] }): Promise<string> {
-        const start = Date.now();
-
-        try {
+        return loggedAction('🚀 spawning process', { tags: tags.map(t => `${t.name}=${t.value}`).join(', ') }, async () => {
             const args = {
                 scheduler: Constants.Scheduler,
                 module: Constants.Module,
@@ -130,19 +129,12 @@ export class ConnectionManager {
                 ]
             }
             const res: string = await this.ao.spawn(args)
-            const duration = Date.now() - start;
-
             return res;
-        } catch (error) {
-            const duration = Date.now() - start;
-            throw error;
-        }
+        });
     }
 
     async execLua({ processId, code, tags }: { processId: string, code: string, tags: Tag[] }): Promise<MessageResult & { id: string }> {
-        const start = Date.now();
-
-        try {
+        return loggedAction('⚙️ executing lua', { processId, codeLength: code.length }, async () => {
             const args = {
                 process: processId,
                 data: code,
@@ -159,85 +151,47 @@ export class ConnectionManager {
                 message: messageId,
             })
 
-            const duration = Date.now() - start;
-            const success = !res.Error;
-
-            if (success) {
-            } else {
-            }
-
             res.id = messageId
-
             return res;
-        } catch (error) {
-            const duration = Date.now() - start;
-            throw error;
-        }
+        });
     }
 
     async sendMessage({ processId, data, tags }: { processId: string, data?: string, tags: Tag[] }): Promise<MessageResult & { id: string }> {
-        const start = Date.now();
 
-        try {
-            const args = {
-                process: processId,
-                data: data || "",
-                signer: this.getAoSigner(),
-                tags,
-            }
-            const messageId: string = await this.ao.message(args)
-
-            const res: MessageResult & { id: string } = await this.ao.result({
-                process: processId,
-                message: messageId,
-            })
-
-            const duration = Date.now() - start;
-            const success = !res.Error;
-
-            if (success) {
-            } else {
-            }
-
-            res.id = messageId;
-
-            return res;
-        } catch (error) {
-            const duration = Date.now() - start;
-            throw error;
+        const args = {
+            process: processId,
+            data: data || "",
+            signer: this.getAoSigner(),
+            tags,
         }
+        const messageId: string = await this.ao.message(args)
+
+        const res: MessageResult & { id: string } = await this.ao.result({
+            process: processId,
+            message: messageId,
+        })
+
+        res.id = messageId;
+        return res;
+
     }
 
     async dryrun({ processId, data, tags }: { processId: string, data?: string, tags: Tag[] }): Promise<MessageResult> {
-        const start = Date.now();
+        // For dryrun requests, we need a valid owner/wallet address
+        let owner = this.owner;
 
-        try {
-            // For dryrun requests, we need a valid owner/wallet address
-            let owner = this.owner;
-
-            // If no owner is set or empty, use a placeholder address for read-only operations
-            if (!owner || owner.trim() === "") {
-                owner = "placeholder-read-only-address";
-            }
-            const res: MessageResult = await this.ao.dryrun({
-                process: processId,
-                data: data || "",
-                tags,
-                Owner: owner,
-            })
-
-            const duration = Date.now() - start;
-            const success = !res.Error;
-
-            if (success) {
-            } else {
-            }
-
-            return res;
-        } catch (error) {
-            const duration = Date.now() - start;
-            throw error;
+        // If no owner is set or empty, use a placeholder address for read-only operations
+        if (!owner || owner.trim() === "") {
+            owner = "placeholder-read-only-address";
         }
+        const res: MessageResult = await this.ao.dryrun({
+            process: processId,
+            data: data || "",
+            tags,
+            Owner: owner,
+        })
+
+        return res;
     }
 
     parseOutput(res: MessageResult, { hasMatchingTag, hasMatchingTagValue }: { hasMatchingTag?: string, hasMatchingTagValue?: string } = {}) {
@@ -258,14 +212,22 @@ export class ConnectionManager {
 
         let returnMessage = null;
         if (res.Messages && res.Messages.length > 0) {
-
             if (hasMatchingTag || hasMatchingTagValue) {
                 let found = false;
                 for (const message of res.Messages) {
-                    if (message.Tags && message.Tags.find((tag: Tag) => (tag.name == hasMatchingTag || tag.value == hasMatchingTagValue))) {
-                        returnMessage = message;
-                        found = true;
-                        break;
+                    if (message.Tags) {
+                        const msg = message.Tags.find((tag: Tag) => {
+                            if (hasMatchingTag && hasMatchingTagValue) {
+                                return tag.name === hasMatchingTag && tag.value === hasMatchingTagValue;
+                            } else {
+                                return tag.name === hasMatchingTag || tag.value === hasMatchingTagValue;
+                            }
+                        })
+                        if (msg) {
+                            returnMessage = message;
+                            found = true;
+                            break;
+                        }
                     }
                 }
                 if (!found) {
@@ -283,7 +245,7 @@ export class ConnectionManager {
         }
 
         // translate from array of {name, value} to {name: value} object
-        if (returnMessage.Tags) {
+        if (returnMessage && returnMessage.Tags) {
             const tagsObj: { [key: string]: string } = {};
             for (const tag of returnMessage.Tags) {
                 tagsObj[tag.name] = tag.value;
