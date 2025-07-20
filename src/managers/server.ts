@@ -183,8 +183,6 @@ export class ServerManager {
                 }, {})
             }
 
-            console.log(server.roles);
-
             return server;
         });
     }
@@ -204,8 +202,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Server-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -224,7 +222,7 @@ export class ServerManager {
         });
     }
 
-    async getAllMembers(serverId: string): Promise<Member[]> {
+    async getAllMembers(serverId: string): Promise<Record<string, Member>> {
         return loggedAction('🔍 getting all members', { serverId }, async () => {
             const res = await this.connectionManager.dryrun({
                 processId: serverId,
@@ -234,7 +232,7 @@ export class ServerManager {
             });
 
             const msg = this.connectionManager.parseOutput(res);
-            return JSON.parse(msg.Data) || [];
+            return JSON.parse(msg.Data);
         });
     }
 
@@ -347,8 +345,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Create-Category-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -369,8 +367,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Category-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -384,8 +382,8 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Delete-Category-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -398,15 +396,15 @@ export class ServerManager {
 
             if (params.categoryId) tags.push({ name: "CategoryId", value: params.categoryId });
             if (params.orderId !== undefined) tags.push({ name: "OrderId", value: params.orderId.toString() });
-            if (params.type) tags.push({ name: "Type", value: params.type });
+            // if (params.type) tags.push({ name: "Type", value: params.type }); // Commented out - server doesn't handle this yet
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Create-Channel-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -426,8 +424,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Channel-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -441,8 +439,8 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Delete-Channel-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -462,8 +460,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Create-Role-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -484,8 +482,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Role-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -499,8 +497,8 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Delete-Role-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -552,8 +550,8 @@ export class ServerManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Send-Message-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -568,8 +566,8 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Edit-Message-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -583,8 +581,8 @@ export class ServerManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Delete-Message-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
