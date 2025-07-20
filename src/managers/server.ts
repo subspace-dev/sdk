@@ -538,7 +538,7 @@ export class ServerManager {
             ];
 
             if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
-            if (params.replyTo) tags.push({ name: "ReplyTo", value: params.replyTo });
+            if (params.replyTo) tags.push({ name: "ReplyTo", value: `${params.replyTo}` });
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
