@@ -163,8 +163,8 @@ export class UserManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Profile-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -193,8 +193,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Add-Friend-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -208,8 +208,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Accept-Friend-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -223,8 +223,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Reject-Friend-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -238,8 +238,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Remove-Friend-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -278,8 +278,8 @@ export class UserManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Send-DM-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -294,8 +294,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Edit-DM-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -309,8 +309,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Delete-DM-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -353,8 +353,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Add-Delegation-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -367,8 +367,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Remove-Delegation-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -381,8 +381,8 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Remove-All-Delegations-Response" });
+            return data?.Tags?.Status === "200";
         });
     }
 } 
