@@ -96,7 +96,8 @@ db:exec([[
 
     CREATE TABLE IF NOT EXISTS members (
         userId TEXT PRIMARY KEY,
-        nickname TEXT
+        nickname TEXT,
+        joinedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
     );
 
     CREATE TABLE IF NOT EXISTS memberRoles (
@@ -523,6 +524,7 @@ end)
 
 Handlers.add("Join-Server", function(msg)
     local userId = msg.From
+    local joinedAt = msg.Timestamp or os.time()
 
     -- Check if server is public (if private, only allow if invited/approved)
     if ValidateCondition(not PublicServer, msg, {
@@ -549,7 +551,7 @@ Handlers.add("Join-Server", function(msg)
     local success = true
 
     -- Add user to server members
-    local rows = SQLWrite("INSERT INTO members (userId) VALUES (?)", userId)
+    local rows = SQLWrite("INSERT INTO members (userId, joinedAt) VALUES (?, ?)", userId, joinedAt)
     if rows ~= 1 then
         success = false
     end
