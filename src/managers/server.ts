@@ -245,7 +245,11 @@ export class ServerManager {
                 { name: "TargetUserId", value: params.userId }
             ];
 
-            if (params.nickname) tags.push({ name: "Nickname", value: params.nickname });
+            if (params.nickname !== undefined) {
+                // Use a special sentinel value for clearing nicknames to avoid empty string issues
+                const nicknameValue = params.nickname === "" ? "__CLEAR_NICKNAME__" : params.nickname;
+                tags.push({ name: "Nickname", value: nicknameValue });
+            }
             if (params.roles) tags.push({ name: "Roles", value: JSON.stringify(params.roles) });
 
             const res = await this.connectionManager.sendMessage({

@@ -1634,7 +1634,7 @@ end)
 Handlers.add("Update-Member", function(msg)
     local userId = msg.From
     local targetUserId = VarOrNil(msg.Tags.TargetUserId)
-    local nickname = VarOrNil(msg.Tags.Nickname)
+    local nickname = msg.Tags.Nickname -- Don't use VarOrNil here to allow empty strings
 
     -- Check if updating own profile or others
     local isUpdatingSelf = (targetUserId == userId or targetUserId == nil)
@@ -1673,9 +1673,19 @@ Handlers.add("Update-Member", function(msg)
         return
     end
 
-    -- Update nickname if provided
-    if nickname then
-        local rows = SQLWrite("UPDATE members SET nickname = ? WHERE userId = ?", nickname, actualTargetId)
+    -- Update nickname if Nickname tag is present (supports clearing nicknames)
+    if msg.Tags.Nickname then
+        nickname = msg.Tags.Nickname
+
+        -- Handle special sentinel value for clearing nicknames
+        local nicknameValue
+        if nickname == "__CLEAR_NICKNAME__" then
+            nicknameValue = nil -- NULL in database clears the nickname
+        else
+            nicknameValue = nickname
+        end
+
+        local rows = SQLWrite("UPDATE members SET nickname = ? WHERE userId = ?", nicknameValue, actualTargetId)
         if ValidateCondition(rows ~= 1, msg, {
                 Status = "500",
                 Data = json.encode({
