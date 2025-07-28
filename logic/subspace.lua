@@ -8,15 +8,15 @@ Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 
 Sources = {
     Bot = {
-        Id = "1SSDrGyj1WC0pa2sj3Oob568zRToTgh0egOvKEVw3Pc",
+        Id = "PKa7vZdJ-lLztZ1XXaO-5MUKH7Q7I49ljUrMslyQuxw",
         Version = "1.0.0"
     },
     Dm = {
-        Id = "JI3tDHbsY7BYkDdmohT_uAHyz73c_m3Kefe0wFpzxYY",
+        Id = "WAcds6-lHTVkmiUxT_UtKSpfsj2njHpyn7DEIi8Dhjk",
         Version = "1.0.0"
     },
     Server = {
-        Id = "9gjEm80EEr8im9zQvqaCCK_UaJM_9Q6SZpBOhP9VWNA",
+        Id = "dRi_Tm6iZ3ui4bRP3pRCdNH8E1V5bPMw9-hvCd9WbIs",
         Version = "1.0.0"
     },
 }

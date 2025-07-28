@@ -4,7 +4,7 @@ json = require("json")
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = "VDkbyJj9o67AtTaYregitjDgcrLWmrxMvKICbWR-kBA"
+Subspace = "H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY"
 Version = Version or "1.0.0"
 
 db = db or sqlite3.open_memory()

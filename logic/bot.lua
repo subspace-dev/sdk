@@ -4,7 +4,7 @@ json = require("json")
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = "VDkbyJj9o67AtTaYregitjDgcrLWmrxMvKICbWR-kBA"
+Subspace = "H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY"
 Name = Name or "{NAME}"
 Pfp = Pfp or "{PFP}"
 PublicBot = PublicBot or ("{PUBLIC}" == "true")

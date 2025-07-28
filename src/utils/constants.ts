@@ -1,5 +1,5 @@
 export const Constants = {
-    Subspace: 'VDkbyJj9o67AtTaYregitjDgcrLWmrxMvKICbWR-kBA',
+    Subspace: 'H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY',
     Authority: 'fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY',
 
     // AO Configuration
