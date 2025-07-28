@@ -8,15 +8,15 @@ Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 
 Sources = {
     Bot = {
-        Id = "Jq-Fizuy60A0byfQXFVGbMlSeBDV7ehq7CClbtbr5J4",
+        Id = "1SSDrGyj1WC0pa2sj3Oob568zRToTgh0egOvKEVw3Pc",
         Version = "1.0.0"
     },
     Dm = {
-        Id = "-8CKRs65Kjjxg5iCDlVPJbvC3pi05FsCzunAIbVU6qg",
+        Id = "JI3tDHbsY7BYkDdmohT_uAHyz73c_m3Kefe0wFpzxYY",
         Version = "1.0.0"
     },
     Server = {
-        Id = "BG8lJDO-X_RpJwz_au311KXnGKL9h6AVZY07hevS204",
+        Id = "9gjEm80EEr8im9zQvqaCCK_UaJM_9Q6SZpBOhP9VWNA",
         Version = "1.0.0"
     },
 }
@@ -1167,6 +1167,16 @@ Handlers.add("Send-DM", function(msg)
 
     friendId = GetOriginalId(friendId)
 
+    local senderProfile = GetProfile(senderId)
+    if ValidateCondition(not senderProfile, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Sender profile not found"
+            })
+        }) then
+        return
+    end
+
     local friendProfile = GetProfile(friendId)
     if ValidateCondition(not friendProfile, msg, {
             Status = "404",
@@ -1221,8 +1231,8 @@ Handlers.add("Send-DM", function(msg)
     end
 
     -- Send the DM
-    msg.forward(friendProfile.dmProcess, { ["X-Origin-Id"] = msg.Id })
-    msg.forward(senderProfile.dmProcess, { ["X-Origin-Id"] = msg.Id })
+    msg.forward(friendProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
+    msg.forward(senderProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
 
     msg.reply({
         Action = "Send-DM-Response",
@@ -1277,8 +1287,8 @@ Handlers.add("Delete-DM", function(msg)
         return
     end
 
-    msg.forward(senderProfile.dmProcess, { ["X-Origin-Id"] = msg.Id })
-    msg.forward(friendProfile.dmProcess, { ["X-Origin-Id"] = msg.Id })
+    msg.forward(senderProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
+    msg.forward(friendProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
 
 
     msg.reply({
@@ -1344,8 +1354,8 @@ Handlers.add("Edit-DM", function(msg)
         return
     end
 
-    msg.forward(senderProfile.dmProcess, { ["X-Origin-Id"] = msg.Id })
-    msg.forward(friendProfile.dmProcess, { ["X-Origin-Id"] = msg.Id })
+    msg.forward(senderProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
+    msg.forward(friendProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
 
     msg.reply({
         Action = "Edit-DM-Response",

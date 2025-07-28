@@ -100,7 +100,7 @@ Handlers.add("Info", function(msg)
 end)
 
 Handlers.add("Get-DMs", function(msg)
-    assert(Owner ~= msg.From, "❌[auth error] Dm module not initialized")
+    assert(Owner == msg.From, "❌[auth error] Dm module not initialized")
 
     local dmUserId = VarOrNil(msg.Tags.FriendId)
     local limit = VarOrNil(msg.Tags.Limit)
@@ -108,26 +108,47 @@ Handlers.add("Get-DMs", function(msg)
     local before = VarOrNil(msg.Tags.Before)
     local eventId = VarOrNil(msg.Tags.EventId) -- eventId is the id of the last event fetched (optional)
 
-    local query = "SELECT * FROM messages"
-    if dmUserId then
-        query = query .. " WHERE dmUserId = ?"
-    end
+    -- debug print data
+    -- print("DM UserId: " .. (dmUserId or "nil"))
+    -- print("Limit: " .. (limit or "nil"))
+    -- print("After: " .. (after or "nil"))
+    -- print("Before: " .. (before or "nil"))
+    -- print("EventId: " .. (eventId or "nil"))
+    -- print("From: " .. msg.From)
+    -- print("Owner: " .. Owner)
 
-    if limit then
-        query = query .. " LIMIT ?"
+    local query = "SELECT * FROM messages"
+    local queryParams = {}
+
+    -- Build WHERE clause
+    local whereConditions = {}
+    if dmUserId then
+        table.insert(whereConditions, "dmUserId = ?")
+        table.insert(queryParams, dmUserId)
     end
 
     if after then
-        query = query .. " AND messageId > ?"
+        table.insert(whereConditions, "messageId > ?")
+        table.insert(queryParams, after)
     end
 
     if before then
-        query = query .. " AND messageId < ?"
+        table.insert(whereConditions, "messageId < ?")
+        table.insert(queryParams, before)
+    end
+
+    if #whereConditions > 0 then
+        query = query .. " WHERE " .. table.concat(whereConditions, " AND ")
     end
 
     query = query .. " ORDER BY messageId DESC"
 
-    local messages = SQLRead(query, dmUserId, limit, after, before)
+    if limit then
+        query = query .. " LIMIT ?"
+        table.insert(queryParams, limit)
+    end
+
+    local messages = SQLRead(query, table.unpack(queryParams))
 
     local events = {}
     if eventId then

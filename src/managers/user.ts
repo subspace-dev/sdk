@@ -189,7 +189,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.SendFriendRequest },
-                    { name: "UserId", value: userId }
+                    { name: "FriendId", value: userId }
                 ]
             });
 
@@ -204,7 +204,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.AcceptFriendRequest },
-                    { name: "UserId", value: userId }
+                    { name: "FriendId", value: userId }
                 ]
             });
 
@@ -219,7 +219,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.RejectFriendRequest },
-                    { name: "UserId", value: userId }
+                    { name: "FriendId", value: userId }
                 ]
             });
 
@@ -234,7 +234,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.RemoveFriend },
-                    { name: "UserId", value: userId }
+                    { name: "FriendId", value: userId }
                 ]
             });
 
@@ -243,12 +243,13 @@ export class UserManager {
         });
     }
 
-    async getDMs(dmProcessId: string, params: { limit?: number; before?: string; after?: string } = {}): Promise<DMResponse | null> {
-        return loggedAction('🔍 getting DMs', { dmProcessId, limit: params.limit }, async () => {
+    async getDMs(dmProcessId: string, params: { friendId?: string; limit?: number; before?: string; after?: string } = {}): Promise<DMResponse | null> {
+        return loggedAction('🔍 getting DMs', { dmProcessId, friendId: params.friendId, limit: params.limit }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.GetDMs }
             ];
 
+            if (params.friendId) tags.push({ name: "FriendId", value: params.friendId });
             if (params.limit) tags.push({ name: "Limit", value: params.limit.toString() });
             if (params.before) tags.push({ name: "Before", value: params.before });
             if (params.after) tags.push({ name: "After", value: params.after });
@@ -258,8 +259,25 @@ export class UserManager {
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data ? data as DMResponse : null;
+            const rawData = JSON.parse(this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Get-DMs-Response" }).Data);
+
+            if (!rawData || !rawData.messages) return null;
+
+            // Map the field names from Lua response to DMMessage interface
+            const mappedMessages: DMMessage[] = rawData.messages.map((msg: any) => ({
+                id: msg.messageId.toString(), // Convert to string and rename
+                senderId: msg.authorId, // Rename from authorId to senderId
+                content: msg.content,
+                timestamp: msg.timestamp,
+                attachments: msg.attachments,
+                replyTo: msg.replyTo
+            }));
+
+            return {
+                messages: mappedMessages,
+                hasMore: false, // Can be enhanced later with pagination
+                cursor: undefined
+            } as DMResponse;
         });
     }
 
@@ -283,6 +301,27 @@ export class UserManager {
         });
     }
 
+    async sendDMToFriend(friendId: string, params: { content: string; attachments?: string; replyTo?: number }): Promise<boolean> {
+        return loggedAction('📤 sending DM to friend', { friendId, content: params.content.substring(0, 100) + (params.content.length > 100 ? '...' : '') }, async () => {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.SendDM },
+                { name: "FriendId", value: friendId }
+            ];
+
+            if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
+            if (params.replyTo) tags.push({ name: "ReplyTo", value: params.replyTo.toString() });
+
+            const res = await this.connectionManager.sendMessage({
+                processId: Constants.Subspace,
+                tags,
+                data: params.content
+            });
+
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Send-DM-Response" });
+            return data?.Tags?.Status === "200";
+        });
+    }
+
     async editDM(dmProcessId: string, params: { messageId: string; content: string }): Promise<boolean> {
         return loggedAction('✏️ editing DM', { dmProcessId, messageId: params.messageId }, async () => {
             const res = await this.connectionManager.sendMessage({
@@ -299,12 +338,45 @@ export class UserManager {
         });
     }
 
+    async editDMToFriend(friendId: string, params: { messageId: string; content: string }): Promise<boolean> {
+        return loggedAction('✏️ editing DM to friend', { friendId, messageId: params.messageId }, async () => {
+            const res = await this.connectionManager.sendMessage({
+                processId: Constants.Subspace,
+                tags: [
+                    { name: "Action", value: Constants.Actions.EditDM },
+                    { name: "FriendId", value: friendId },
+                    { name: "MessageId", value: params.messageId }
+                ],
+                data: params.content
+            });
+
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Edit-DM-Response" });
+            return data?.Tags?.Status === "200";
+        });
+    }
+
     async deleteDM(dmProcessId: string, messageId: string): Promise<boolean> {
         return loggedAction('🗑️ deleting DM', { dmProcessId, messageId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: dmProcessId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteDM },
+                    { name: "MessageId", value: messageId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Delete-DM-Response" });
+            return data?.Tags?.Status === "200";
+        });
+    }
+
+    async deleteDMToFriend(friendId: string, messageId: string): Promise<boolean> {
+        return loggedAction('🗑️ deleting DM to friend', { friendId, messageId }, async () => {
+            const res = await this.connectionManager.sendMessage({
+                processId: Constants.Subspace,
+                tags: [
+                    { name: "Action", value: Constants.Actions.DeleteDM },
+                    { name: "FriendId", value: friendId },
                     { name: "MessageId", value: messageId }
                 ]
             });
