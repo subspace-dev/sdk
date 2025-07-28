@@ -7,6 +7,7 @@ json = require("json")
 Subspace = "VDkbyJj9o67AtTaYregitjDgcrLWmrxMvKICbWR-kBA"
 Name = Name or "{NAME}"
 Logo = Logo or "{LOGO}"
+Description = Description or "{DESCRIPTION}"
 Balances = Balances or { [Owner] = 1 }
 TotalSupply = TotalSupply or 1
 Denomination = Denomination or 10
@@ -476,6 +477,7 @@ Handlers.add("Info", function(msg)
         Action = "Info-Response",
         Name = Name,
         Logo = Logo,
+        Description = Description,
         Owner_ = Owner,
         Categories = json.encode(categories),
         Channels = json.encode(channels),
@@ -663,6 +665,7 @@ Handlers.add("Update-Server", function(msg)
     local userId = msg.From
     local name = VarOrNil(msg.Tags.Name)
     local logo = VarOrNil(msg.Tags.Logo)
+    local description = VarOrNil(msg.Tags.Description)
     local publicServer = VarOrNil(msg.Tags.PublicServer)
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_SERVER)
@@ -680,6 +683,9 @@ Handlers.add("Update-Server", function(msg)
     end
     if logo then
         Logo = logo
+    end
+    if description then
+        Description = description
     end
 
     if publicServer then
@@ -1046,6 +1052,7 @@ Handlers.add("Update-Channel", function(msg)
     local name = VarOrNil(msg.Tags.Name)
     local allowMessaging = VarOrNil(msg.Tags.AllowMessaging)
     local allowAttachments = VarOrNil(msg.Tags.AllowAttachments)
+    local categoryIdRaw = msg.Tags.CategoryId -- Get raw value first
     local categoryId = VarOrNil(msg.Tags.CategoryId)
     local orderId = VarOrNil(msg.Tags.OrderId)
 
@@ -1086,11 +1093,11 @@ Handlers.add("Update-Channel", function(msg)
 
     -- Determine target category
     local target_categoryId = current_categoryId
-    if categoryId ~= nil then
-        if categoryId == "" then
+    if categoryIdRaw ~= nil then    -- Check raw value instead of processed value
+        if categoryIdRaw == "" then
             target_categoryId = nil -- Moving to uncategorized
         else
-            target_categoryId = tonumber(categoryId)
+            target_categoryId = tonumber(categoryIdRaw)
         end
     end
 
@@ -1189,12 +1196,12 @@ Handlers.add("Update-Channel", function(msg)
         end
     end
 
-    -- Update the channel
     local rows = SQLWrite([[
         UPDATE channels
         SET name = ?, allowMessaging = ?, allowAttachments = ?, categoryId = ?, orderId = ?
         WHERE channelId = ?
     ]], new_name, new_allowMessaging, new_allowAttachments, target_categoryId, new_orderId, channelId)
+
 
     if rows ~= 1 then
         success = false

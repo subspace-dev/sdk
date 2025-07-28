@@ -120,6 +120,7 @@ export class ServerManager {
             // Replace placeholders
             serverSourceCode = serverSourceCode.replace('{NAME}', params.name);
             serverSourceCode = serverSourceCode.replace('{LOGO}', params.logo || '');
+            serverSourceCode = serverSourceCode.replace('{DESCRIPTION}', params.description || '');
             serverSourceCode = serverSourceCode.replace('{TICKER}', ticker);
 
             // Load server source code into the spawned process
@@ -408,16 +409,40 @@ export class ServerManager {
         });
     }
 
-    async updateChannel(serverId: string, params: { channelId: string; name?: string; categoryId?: string; orderId?: number }): Promise<boolean> {
+    async updateChannel(serverId: string, params: { channelId: string; name?: string; categoryId?: string | null; orderId?: number; allowMessaging?: 0 | 1; allowAttachments?: 0 | 1 }): Promise<boolean> {
         return loggedAction('✏️ updating channel', { serverId, channelId: params.channelId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateChannel },
                 { name: "ChannelId", value: params.channelId }
             ];
 
+            // console.log('🔧 SDK DEBUG: Processing params', {
+            //     name: params.name,
+            //     categoryId: params.categoryId,
+            //     categoryIdUndefined: params.categoryId === undefined,
+            //     categoryIdNotUndefined: params.categoryId !== undefined,
+            //     orderId: params.orderId,
+            //     allowMessaging: params.allowMessaging,
+            //     allowAttachments: params.allowAttachments
+            // });
+
             if (params.name) tags.push({ name: "Name", value: params.name });
-            if (params.categoryId) tags.push({ name: "CategoryId", value: params.categoryId });
+            if (params.categoryId !== undefined) {
+                const categoryValue = params.categoryId || "";
+                // console.log('🔧 SDK DEBUG: Adding CategoryId tag', {
+                //     originalCategoryId: params.categoryId,
+                //     categoryValue,
+                //     categoryValueType: typeof categoryValue
+                // });
+                tags.push({ name: "CategoryId", value: categoryValue });
+            } else {
+                // console.log('🔧 SDK DEBUG: CategoryId is undefined, skipping tag');
+            }
             if (params.orderId !== undefined) tags.push({ name: "OrderId", value: params.orderId.toString() });
+            if (params.allowMessaging !== undefined) tags.push({ name: "AllowMessaging", value: params.allowMessaging.toString() });
+            if (params.allowAttachments !== undefined) tags.push({ name: "AllowAttachments", value: params.allowAttachments.toString() });
+
+            // console.log('📤 SDK: Sending tags to server:', tags);
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
@@ -425,6 +450,7 @@ export class ServerManager {
             });
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Channel-Response" });
+            // console.log('📥 SDK: Server response:', data);
             return data?.Tags?.Status === "200";
         });
     }
@@ -444,7 +470,7 @@ export class ServerManager {
         });
     }
 
-    async createRole(serverId: string, params: { name: string; color?: string; permissions?: any; position?: number }): Promise<boolean> {
+    async createRole(serverId: string, params: { name: string; color?: string; permissions?: number | string; position?: number }): Promise<boolean> {
         return loggedAction('➕ creating role', { serverId, ...params }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.CreateRole },
@@ -452,7 +478,7 @@ export class ServerManager {
             ];
 
             if (params.color) tags.push({ name: "Color", value: params.color });
-            if (params.permissions) tags.push({ name: "Permissions", value: JSON.stringify(params.permissions) });
+            if (params.permissions) tags.push({ name: "Permissions", value: params.permissions.toString() });
             if (params.position !== undefined) tags.push({ name: "Position", value: params.position.toString() });
 
             const res = await this.connectionManager.sendMessage({
@@ -465,16 +491,16 @@ export class ServerManager {
         });
     }
 
-    async updateRole(serverId: string, params: { roleId: string; name?: string; color?: string; permissions?: any; position?: number }): Promise<boolean> {
+    async updateRole(serverId: string, params: { roleId: string; name?: string; color?: string; permissions?: number | string; position?: number }): Promise<boolean> {
         return loggedAction('✏️ updating role', { serverId, roleId: params.roleId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateRole },
-                { name: "RoleId", value: params.roleId }
+                { name: "RoleId", value: params.roleId.toString() }
             ];
 
             if (params.name) tags.push({ name: "Name", value: params.name });
             if (params.color) tags.push({ name: "Color", value: params.color });
-            if (params.permissions) tags.push({ name: "Permissions", value: JSON.stringify(params.permissions) });
+            if (params.permissions) tags.push({ name: "Permissions", value: params.permissions.toString() });
             if (params.position !== undefined) tags.push({ name: "Position", value: params.position.toString() });
 
             const res = await this.connectionManager.sendMessage({
@@ -493,7 +519,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteRole },
-                    { name: "RoleId", value: roleId }
+                    { name: "RoleId", value: roleId.toString() }
                 ]
             });
 
@@ -509,7 +535,7 @@ export class ServerManager {
                 tags: [
                     { name: "Action", value: Constants.Actions.AssignRole },
                     { name: "TargetUserId", value: params.userId },
-                    { name: "RoleId", value: params.roleId }
+                    { name: "RoleId", value: params.roleId.toString() }
                 ]
             });
 
@@ -525,7 +551,7 @@ export class ServerManager {
                 tags: [
                     { name: "Action", value: Constants.Actions.UnassignRole },
                     { name: "TargetUserId", value: params.userId },
-                    { name: "RoleId", value: params.roleId }
+                    { name: "RoleId", value: params.roleId.toString() }
                 ]
             });
 
