@@ -28,6 +28,7 @@ export type updateRoleParams = {
     color?: string;
     permissions?: number;
     orderId?: number;
+    position?: number;
 };
 export type assignRoleParams = {
     targetUserId?: string;

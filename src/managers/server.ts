@@ -54,6 +54,7 @@ export interface Role {
     serverId: string;
     color?: string;
     position: number;
+    orderId?: number;  // Server uses orderId for role hierarchy
     permissions: any;
     mentionable?: boolean;
     hoisted?: boolean;
@@ -491,7 +492,7 @@ export class ServerManager {
         });
     }
 
-    async updateRole(serverId: string, params: { roleId: string; name?: string; color?: string; permissions?: number | string; position?: number }): Promise<boolean> {
+    async updateRole(serverId: string, params: { roleId: string; name?: string; color?: string; permissions?: number | string; position?: number; orderId?: number }): Promise<boolean> {
         return loggedAction('✏️ updating role', { serverId, roleId: params.roleId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateRole },
@@ -501,7 +502,14 @@ export class ServerManager {
             if (params.name) tags.push({ name: "Name", value: params.name });
             if (params.color) tags.push({ name: "Color", value: params.color });
             if (params.permissions) tags.push({ name: "Permissions", value: params.permissions.toString() });
-            if (params.position !== undefined) tags.push({ name: "Position", value: params.position.toString() });
+
+            // Fix: Use orderId (what server expects) instead of position
+            // Support both for backward compatibility
+            if (params.orderId !== undefined) {
+                tags.push({ name: "OrderId", value: params.orderId.toString() });
+            } else if (params.position !== undefined) {
+                tags.push({ name: "OrderId", value: params.position.toString() });
+            }
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
@@ -510,6 +518,81 @@ export class ServerManager {
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Role-Response" });
             return data?.Tags?.Status === "200";
+        });
+    }
+
+    /**
+     * Reorder a role to a specific position in the hierarchy
+     * @param serverId The server ID
+     * @param roleId The role ID to reorder
+     * @param newOrderId The new order position (1-based, higher = more privileged)
+     */
+    async reorderRole(serverId: string, roleId: string, newOrderId: number): Promise<boolean> {
+        return loggedAction('🔄 reordering role', { serverId, roleId, newOrderId }, async () => {
+            const tags: Tag[] = [
+                { name: "Action", value: Constants.Actions.UpdateRole },
+                { name: "RoleId", value: roleId.toString() },
+                { name: "OrderId", value: newOrderId.toString() }
+            ];
+
+            const res = await this.connectionManager.sendMessage({
+                processId: serverId,
+                tags
+            });
+
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Role-Response" });
+
+            return data?.Tags?.Status === "200";
+        });
+    }
+
+    /**
+     * Move a role above another role in the hierarchy
+     * @param serverId The server ID
+     * @param roleId The role ID to move
+     * @param targetRoleId The role ID to move above
+     */
+    async moveRoleAbove(serverId: string, roleId: string, targetRoleId: string): Promise<boolean> {
+        return loggedAction('⬆️ moving role above', { serverId, roleId, targetRoleId }, async () => {
+            // Get server data to find current role positions
+            const server = await this.getServer(serverId);
+            if (!server || !server.roles) {
+                throw new Error('Server or roles not found');
+            }
+
+            const targetRole = server.roles[targetRoleId];
+            if (!targetRole) {
+                throw new Error('Target role not found');
+            }
+
+            // Move to target role's position + 1 (higher in hierarchy)
+            const newOrderId = (targetRole.orderId || 0) + 1;
+            return this.reorderRole(serverId, roleId, newOrderId);
+        });
+    }
+
+    /**
+     * Move a role below another role in the hierarchy
+     * @param serverId The server ID
+     * @param roleId The role ID to move
+     * @param targetRoleId The role ID to move below
+     */
+    async moveRoleBelow(serverId: string, roleId: string, targetRoleId: string): Promise<boolean> {
+        return loggedAction('⬇️ moving role below', { serverId, roleId, targetRoleId }, async () => {
+            // Get server data to find current role positions
+            const server = await this.getServer(serverId);
+            if (!server || !server.roles) {
+                throw new Error('Server or roles not found');
+            }
+
+            const targetRole = server.roles[targetRoleId];
+            if (!targetRole) {
+                throw new Error('Target role not found');
+            }
+
+            // Move to target role's position - 1 (lower in hierarchy)
+            const newOrderId = Math.max(1, (targetRole.orderId || 0) - 1);
+            return this.reorderRole(serverId, roleId, newOrderId);
         });
     }
 

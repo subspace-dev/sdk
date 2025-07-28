@@ -34,6 +34,7 @@ export type updateRoleParams = {
     color?: string
     permissions?: number
     orderId?: number
+    position?: number  // Backward compatibility, maps to orderId
 }
 
 export type assignRoleParams = {
