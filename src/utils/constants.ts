@@ -47,6 +47,7 @@ export const Constants = {
         CreateServer: 'Create-Server',
         UpdateServer: 'Update-Server',
         CreateServerCheck: 'Create-Server-Check',
+        UpdateServerCode: 'Update-Server-Code',
 
         // Member actions
         GetMember: 'Get-Member',

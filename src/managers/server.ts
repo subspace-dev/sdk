@@ -9,6 +9,7 @@ export interface Server {
     name: string;
     logo?: string;
     description?: string;
+    version?: string;
     memberCount: number;
     members?: Member[];
     channels: Channel[];
@@ -176,6 +177,7 @@ export class ServerManager {
                 name: data.Tags.Name,
                 logo: data.Tags.Logo,
                 description: data.Tags.Description,
+                version: data.Tags.Version,
                 memberCount: parseInt(data.Tags.MemberCount) || 0,
                 channels: JSON.parse(data.Tags.Channels),
                 categories: JSON.parse(data.Tags.Categories),
@@ -206,6 +208,50 @@ export class ServerManager {
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Server-Response" });
             return data?.Tags?.Status === "200";
+        });
+    }
+
+    async updateServerCode(serverId: string): Promise<boolean> {
+        return loggedAction('🔄 updating server code', { serverId }, async () => {
+            await this.connectionManager.refreshSources()
+
+            // Wait for sources to be available (retry up to 3 times)
+            for (let i = 0; i < 3; i++) {
+                if (this.connectionManager.sources?.Server?.Lua) break;
+                await new Promise(resolve => setTimeout(resolve, 1000 * i));
+            }
+
+            if (!this.connectionManager.sources?.Server?.Lua) {
+                throw new Error("Failed to get latest server source code");
+            }
+
+            // Get the current server to extract its metadata
+            const currentServer = await this.getServer(serverId);
+            if (!currentServer) {
+                throw new Error("Server not found");
+            }
+
+            // Get the latest server source code
+            let serverSourceCode = this.connectionManager.sources.Server.Lua;
+
+            // Replace template placeholders with current server data
+            serverSourceCode = serverSourceCode.replace('{NAME}', currentServer.name);
+            serverSourceCode = serverSourceCode.replace('{LOGO}', currentServer.logo || '');
+            serverSourceCode = serverSourceCode.replace('{DESCRIPTION}', currentServer.description || '');
+
+            // Generate ticker from current server name
+            const ticker = currentServer.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 5).toUpperCase() || 'SRVR';
+            serverSourceCode = serverSourceCode.replace('{TICKER}', ticker);
+
+            // Execute the updated server source code
+            const res = await this.connectionManager.execLua({
+                processId: serverId,
+                code: serverSourceCode,
+                tags: [{ name: "Action", value: Constants.Actions.UpdateServerCode }]
+            });
+
+            const data = this.connectionManager.parseOutput(res);
+            return data?.success !== false; // Consider success if no explicit failure
         });
     }
 
@@ -675,8 +721,9 @@ export class ServerManager {
                 tags: [
                     { name: "Action", value: Constants.Actions.EditMessage },
                     { name: "MessageId", value: params.messageId },
-                    { name: "Content", value: params.content }
-                ]
+                    // { name: "Content", value: params.content }
+                ],
+                data: params.content
             });
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Edit-Message-Response" });

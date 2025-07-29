@@ -32,6 +32,7 @@ export declare const Constants: {
         CreateServer: string;
         UpdateServer: string;
         CreateServerCheck: string;
+        UpdateServerCode: string;
         GetMember: string;
         GetAllMembers: string;
         UpdateMember: string;

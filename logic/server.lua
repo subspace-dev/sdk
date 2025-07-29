@@ -12,7 +12,7 @@ Balances = Balances or { [Owner] = 1 }
 TotalSupply = TotalSupply or 1
 Denomination = Denomination or 10
 Ticker = Ticker or "{TICKER}"
-Version = Version or "1.0.0"
+Version_ = Version_ or "1.0.0" -- Version is already a built in function
 
 -- By default servers are public and anyone can join
 -- If private, new users cannot join
@@ -484,7 +484,7 @@ Handlers.add("Info", function(msg)
         Roles = json.encode(roles),
         PublicServer = tostring(PublicServer),
         MemberCount = tostring(memberCount),
-        Version = tostring(Version),
+        Version = tostring(Version_),
         -- IGNORE REST
         Denomination = tostring(Denomination),
         Ticker = Ticker,

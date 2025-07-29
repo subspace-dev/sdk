@@ -53,27 +53,7 @@ export class ConnectionManager {
             GATEWAY_URL: this.gatewayUrl,
         })
 
-        // fetch sources from Subspace process
-        this.dryrun({
-            processId: Constants.Subspace,
-            tags: [
-                { name: "Action", value: "Sources" }
-            ]
-        }).then(async (res) => {
-            const sources = this.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Sources-Response" })
-            if (sources && sources.Data) {
-                const sourcesData = JSON.parse(sources.Data)
-                this.sources = sourcesData as Sources
-                // fetch source src from arweave.net/Id
-                const fetchPromises = Object.values(this.sources).map(async (source) => {
-                    if (source.Id) {
-                        const src = await fetch(`${this.gatewayUrl}/${source.Id}`).then(res => res.text())
-                        source.Lua = src
-                    }
-                })
-                await Promise.all(fetchPromises)
-            }
-        })
+        this.refreshSources()
     }
 
     updateConfig(config: Partial<ConnectionConfig>) {
@@ -89,6 +69,34 @@ export class ConnectionManager {
             CU_URL: this.cuUrl,
             GATEWAY_URL: this.gatewayUrl,
         })
+    }
+
+    public async refreshSources() {
+        // fetch sources from Subspace process
+        const res = await this.dryrun({
+            processId: Constants.Subspace,
+            tags: [
+                { name: "Action", value: "Sources" }
+            ]
+        })
+        if (res.Error) {
+            throw new Error(`AO Error: ${res.Error}`)
+        }
+
+        const sources = this.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Sources-Response" })
+        if (sources && sources.Data) {
+            const sourcesData = JSON.parse(sources.Data)
+            this.sources = sourcesData as Sources
+            // fetch source src from arweave.net/Id
+            const fetchPromises = Object.values(this.sources).map(async (source) => {
+                if (source.Id) {
+                    const src = await fetch(`${this.gatewayUrl}/${source.Id}`).then(res => res.text())
+                    source.Lua = src
+                }
+            })
+            await Promise.all(fetchPromises)
+        }
+        return this.sources
     }
 
     getAo() { return this.ao }
