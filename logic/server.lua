@@ -1606,7 +1606,7 @@ end)
 
 Handlers.add("Get-All-Members", function(msg)
     local membersWithRoles = SQLRead([[
-        SELECT m.userId, m.nickname, mr.roleId
+        SELECT m.userId, m.nickname, mr.roleId, m.joinedAt
         FROM members m
         LEFT JOIN memberRoles mr ON m.userId = mr.userId
     ]])
@@ -1616,6 +1616,7 @@ Handlers.add("Get-All-Members", function(msg)
         if not membersArranged[row.userId] then
             membersArranged[row.userId] = {
                 nickname = row.nickname,
+                joinedAt = row.joinedAt,
                 roles = {}
             }
         end
