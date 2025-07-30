@@ -9,7 +9,10 @@ export interface Profile {
     displayName?: string;
     bio?: string;
     banner?: string;
-    serversJoined?: string[];
+    serversJoined: {
+        serverId: string;
+        orderId: number;
+    }[];
     friends?: {
         accepted: string[]
         sent: string[]
@@ -91,7 +94,7 @@ export class UserManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
+            const data = JSON.parse(this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Get-Bulk-Profile-Response" }).Data);
             return data || [];
         });
     }
