@@ -752,11 +752,11 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.GetSingleMessage },
-                    { name: "MessageId", value: messageId }
+                    { name: "MessageId", value: String(messageId) }
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
+            const data = JSON.parse(this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Get-Single-Message-Response" }).Data);
             return data ? data as Message : null;
         });
     }
