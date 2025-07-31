@@ -286,7 +286,7 @@ Handlers.add("Create-Profile", function(msg)
 
     -- check if profile already exists
     local profile = GetProfile(userId)
-    if profile then
+    if profile and profile.dmProcess then
         msg.reply({
             Action = "Create-Profile-Response",
             Status = "400",
@@ -321,7 +321,7 @@ Handlers.add("Create-Profile", function(msg)
     end
 
     -- create profile
-    SQLWrite("INSERT INTO profiles (userId, dmProcess) VALUES (?, ?)", userId, dmProcess)
+    SQLWrite("INSERT OR REPLACE INTO profiles (userId, dmProcess) VALUES (?, ?)", userId, dmProcess)
 
     msg.reply({
         Action = "Create-Profile-Response",
