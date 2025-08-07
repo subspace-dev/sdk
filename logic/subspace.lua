@@ -261,20 +261,39 @@ end
 
 ----------------------------------------------------------------------------
 
-function GetFullState()
+function SyncProcessState()
+    -- This function is used to take all the possible data and couple it into
+    -- a single table which will be stored in Hyperbeams state for quick access.
+    -- Everything must be in a JSON like structure
+    -- This function should be called everytime after a change is made to the server
+
     local profiles = SQLRead("SELECT * FROM profiles")
     local servers = SQLRead("SELECT * FROM servers")
     local serversJoined = SQLRead("SELECT * FROM serversJoined")
     local friends = SQLRead("SELECT * FROM friends")
     local delegations = SQLRead("SELECT * FROM delegations")
+    local bots = SQLRead("SELECT * FROM bots")
+    local botServers = SQLRead("SELECT * FROM botServers")
+    local notifications = SQLRead("SELECT * FROM notifications")
 
-    return {
+    local state = {
+        sources = Sources,
         profiles = profiles,
         servers = servers,
         serversJoined = serversJoined,
         friends = friends,
-        delegations = delegations
+        delegations = delegations,
+        bots = bots,
+        botServers = botServers,
+        notifications = notifications
     }
+
+    -- Special message to the patch device which will update the cache in hyperbeam nodes
+    Send({
+        Target = ao.id,
+        device = "patch@1.0",
+        cache = { subspace = state }
+    })
 end
 
 ----------------------------------------------------------------------------

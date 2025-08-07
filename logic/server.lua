@@ -464,6 +464,40 @@ function ResequenceCategoriesAndChannels()
     ResequenceChannels(nil)
 end
 
+function SyncProcessState()
+    -- This function is used to take all the possible data and couple it into
+    -- a single table which will be stored in Hyperbeams state for quick access.
+    -- Everything must be in a JSON like structure
+    -- This function should be called everytime after a change is made to the server
+
+    local membersArranged = GetAllMembers()
+
+    local state = {
+        info = {
+            name = Name,
+            logo = Logo,
+            description = Description,
+            owner = Owner,
+            publicServer = PublicServer,
+            version = Version_,
+            denomination = Denomination,
+            ticker = Ticker,
+            categories = SQLRead("SELECT * FROM categories ORDER BY orderId ASC"),
+            channels = SQLRead("SELECT * FROM channels ORDER BY orderId ASC"),
+            roles = SQLRead("SELECT * FROM roles ORDER BY orderId ASC"),
+            memberCount = SQLRead("SELECT COUNT(*) as memberCount FROM members")[1].memberCount,
+        },
+        members = membersArranged,
+    }
+
+    -- Special message to the patch device which will update the cache in hyperbeam nodes
+    Send({
+        Target = ao.id,
+        device = "patch@1.0",
+        cache = { server = state }
+    })
+end
+
 ----------------------------------------------------------------------------
 
 Handlers.add("Info", function(msg)
@@ -1604,7 +1638,7 @@ Handlers.add("Get-Member", function(msg)
     })
 end)
 
-Handlers.add("Get-All-Members", function(msg)
+function GetAllMembers()
     local membersWithRoles = SQLRead([[
         SELECT m.userId, m.nickname, mr.roleId, m.joinedAt
         FROM members m
@@ -1624,6 +1658,12 @@ Handlers.add("Get-All-Members", function(msg)
             table.insert(membersArranged[row.userId].roles, row.roleId)
         end
     end
+
+    return membersArranged
+end
+
+Handlers.add("Get-All-Members", function(msg)
+    local membersArranged = GetAllMembers()
 
     msg.reply({
         Action = "Get-Members-Response",

@@ -3,8 +3,7 @@ export const Constants = {
     Authority: 'fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY',
     // AO Configuration
     Scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
-    Module: "33d-3X8mpv6xYBlVB-eXMrPfH5Kzf6Hiwhcv0UA10sw",
-    Profiles: "J-GI_SARbZ8O0km4JiE2lu2KJdZIWMo53X3HrqusXjY",
+    Module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s", // sqlite aos 2.0.4 supports patch device
     CuEndpoints: [
         "https://cu.ao-testnet.xyz",
         "https://cu.arnode.asia",
