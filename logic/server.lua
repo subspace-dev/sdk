@@ -1,10 +1,10 @@
-sqlite3 = require("lsqlite3")
+-- sqlite3 = require("lsqlite3")
 json = require("json")
 
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = "H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY"
+Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
 Name = Name or "{NAME}"
 Logo = Logo or "{LOGO}"
 Description = Description or "{DESCRIPTION}"
@@ -19,40 +19,40 @@ Version_ = Version_ or "1.0.0" -- Version is already a built in function
 -- Get requests can still be done and non members can still see and fetch messages
 PublicServer = PublicServer or true
 
-db = db or sqlite3.open_memory()
+-- db = db or sqlite3.open_memory()
 
 ----------------------------------------------------------------------------
 
 -- easily read from the database
-function SQLRead(query, ...)
-    local m = {}
-    local _ = 1
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        for row in stmt:nrows() do
-            -- table.insert(m, row)
-            m[_] = row
-            _ = _ + 1
-        end
-        stmt:finalize()
-    end
-    return m
-end
+-- function SQLRead(query, ...)
+--     local m = {}
+--     local _ = 1
+--     local stmt = db:prepare(query)
+--     if stmt then
+--         local bind_res = stmt:bind_values(...)
+--         assert(bind_res, "❌[bind error] " .. db:errmsg())
+--         for row in stmt:nrows() do
+--             -- table.insert(m, row)
+--             m[_] = row
+--             _ = _ + 1
+--         end
+--         stmt:finalize()
+--     end
+--     return m
+-- end
 
--- easily write to the database
-function SQLWrite(query, ...)
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        local step = stmt:step()
-        assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
-        stmt:finalize()
-    end
-    return db:changes()
-end
+-- -- easily write to the database
+-- function SQLWrite(query, ...)
+--     local stmt = db:prepare(query)
+--     if stmt then
+--         local bind_res = stmt:bind_values(...)
+--         assert(bind_res, "❌[bind error] " .. db:errmsg())
+--         local step = stmt:step()
+--         assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
+--         stmt:finalize()
+--     end
+--     return db:changes()
+-- end
 
 function VarOrNil(var)
     return var ~= "" and var or nil
@@ -75,86 +75,122 @@ function ValidateCondition(condition, msg, body)
 end
 
 ----------------------------------------------------------------------------
+local categories_default = {
+    ["1"] = {
+        name = "Welcome",
+        orderId = 1,
+        allowMessaging = 1,
+        allowAttachments = 1
+    }
+}
+local channels_default = {
+    ["1"] = {
+        name = "General",
+        orderId = 1,
+        categoryId = "1",
+    }
+}
+local roles_default = {
+    ["1"] = {
+        roleId = "1",
+        name = "everyone",
+        orderId = 1,
+        color = "#99AAB5",
+        permissions = 1 -- SEND_MESSAGES
+    }
+}
 
-db:exec([[
-    CREATE TABLE IF NOT EXISTS categories (
-        categoryId INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        orderId INTEGER NOT NULL DEFAULT 1,
-        allowMessaging INTEGER NOT NULL DEFAULT 1,
-        allowAttachments INTEGER NOT NULL DEFAULT 1
-    );
+categories = categories or categories_default
+channels = channels or channels_default
+members = members or {}
+roles = roles or roles_default
+messages = messages or {}
+events = events or {}
+bots = bots or {}
+MemberCount = MemberCount or 0
 
-    CREATE TABLE IF NOT EXISTS channels (
-        channelId INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        orderId INTEGER NOT NULL DEFAULT 1,
-        categoryId INTEGER,
-        allowMessaging INTEGER DEFAULT NULL,
-        allowAttachments INTEGER DEFAULT NULL,
-        FOREIGN KEY (categoryId) REFERENCES categories(categoryId) ON DELETE SET NULL
-    );
+-- additional tables for easier lookup, minimize searching
+role_member_mapping = role_member_mapping or {} -- {roleId = {memberId=true, memberId=true, ...}}
 
-    CREATE TABLE IF NOT EXISTS members (
-        userId TEXT PRIMARY KEY,
-        nickname TEXT,
-        joinedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-    );
+-- db:exec([[
+--     CREATE TABLE IF NOT EXISTS categories (
+--         categoryId INTEGER PRIMARY KEY AUTOINCREMENT,
+--         name TEXT NOT NULL,
+--         orderId INTEGER NOT NULL DEFAULT 1,
+--         allowMessaging INTEGER NOT NULL DEFAULT 1,
+--         allowAttachments INTEGER NOT NULL DEFAULT 1
+--     );
 
-    CREATE TABLE IF NOT EXISTS memberRoles (
-        userId TEXT,
-        roleId INTEGER,
-        FOREIGN KEY (userId) REFERENCES members(userId) ON DELETE CASCADE,
-        FOREIGN KEY (roleId) REFERENCES roles(roleId) ON DELETE CASCADE
-    );
+--     CREATE TABLE IF NOT EXISTS channels (
+--         channelId INTEGER PRIMARY KEY AUTOINCREMENT,
+--         name TEXT NOT NULL,
+--         orderId INTEGER NOT NULL DEFAULT 1,
+--         categoryId INTEGER,
+--         allowMessaging INTEGER DEFAULT NULL,
+--         allowAttachments INTEGER DEFAULT NULL,
+--         FOREIGN KEY (categoryId) REFERENCES categories(categoryId) ON DELETE SET NULL
+--     );
 
-    CREATE TABLE IF NOT EXISTS messages (
-        messageId INTEGER PRIMARY KEY AUTOINCREMENT,
-        content TEXT NOT NULL,
-        channelId INTEGER,
-        authorId TEXT,
-        messageTxId TEXT UNIQUE,
-        timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-        edited INTEGER NOT NULL DEFAULT 0,
-        attachments TEXT DEFAULT "[]",
-        replyTo INTEGER,
-        FOREIGN KEY (channelId) REFERENCES channels(channelId) ON DELETE CASCADE,
-        FOREIGN KEY (authorId) REFERENCES members(userId) ON DELETE SET NULL,
-        FOREIGN KEY (replyTo) REFERENCES messages(messageId) ON DELETE SET NULL
-    );
+--     CREATE TABLE IF NOT EXISTS members (
+--         userId TEXT PRIMARY KEY,
+--         nickname TEXT,
+--         joinedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+--     );
 
-    CREATE TABLE IF NOT EXISTS roles (
-        roleId INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        orderId INTEGER NOT NULL DEFAULT 1,
-        color TEXT NOT NULL,
-        permissions INTEGER NOT NULL DEFAULT 0
-    );
+--     CREATE TABLE IF NOT EXISTS memberRoles (
+--         userId TEXT,
+--         roleId INTEGER,
+--         FOREIGN KEY (userId) REFERENCES members(userId) ON DELETE CASCADE,
+--         FOREIGN KEY (roleId) REFERENCES roles(roleId) ON DELETE CASCADE
+--     );
 
-    CREATE TABLE IF NOT EXISTS events (
-        eventId INTEGER PRIMARY KEY AUTOINCREMENT,
-        eventType TEXT, CHECK (eventType IN ("DELETE_MESSAGE", "EDIT_MESSAGE")),
-        messageId INTEGER,
-        FOREIGN KEY (messageId) REFERENCES messages(messageId)
-    );
+--     CREATE TABLE IF NOT EXISTS messages (
+--         messageId INTEGER PRIMARY KEY AUTOINCREMENT,
+--         content TEXT NOT NULL,
+--         channelId INTEGER,
+--         authorId TEXT,
+--         messageTxId TEXT UNIQUE,
+--         timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+--         edited INTEGER NOT NULL DEFAULT 0,
+--         attachments TEXT DEFAULT "[]",
+--         replyTo INTEGER,
+--         FOREIGN KEY (channelId) REFERENCES channels(channelId) ON DELETE CASCADE,
+--         FOREIGN KEY (authorId) REFERENCES members(userId) ON DELETE SET NULL,
+--         FOREIGN KEY (replyTo) REFERENCES messages(messageId) ON DELETE SET NULL
+--     );
 
-    CREATE TABLE IF NOT EXISTS bots (
-        botProcess TEXT PRIMARY KEY,
-        botApproved INTEGER NOT NULL DEFAULT 0
-    );
-]])
+--     CREATE TABLE IF NOT EXISTS roles (
+--         roleId INTEGER PRIMARY KEY AUTOINCREMENT,
+--         name TEXT NOT NULL,
+--         orderId INTEGER NOT NULL DEFAULT 1,
+--         color TEXT NOT NULL,
+--         permissions INTEGER NOT NULL DEFAULT 0
+--     );
+
+--     CREATE TABLE IF NOT EXISTS events (
+--         eventId INTEGER PRIMARY KEY AUTOINCREMENT,
+--         eventType TEXT, CHECK (eventType IN ("DELETE_MESSAGE", "EDIT_MESSAGE")),
+--         messageId INTEGER,
+--         FOREIGN KEY (messageId) REFERENCES messages(messageId)
+--     );
+
+--     CREATE TABLE IF NOT EXISTS bots (
+--         botProcess TEXT PRIMARY KEY,
+--         botApproved INTEGER NOT NULL DEFAULT 0
+--     );
+-- ]])
 
 -- create default category and channel if the tables are empty
 -- Welcome
 -- - General with Welcome as parent category
-if SQLRead("SELECT COUNT(*) as catCount FROM categories")[1].catCount == 0 then
-    SQLWrite("INSERT INTO categories (name, orderId) VALUES (?, ?)", "Welcome", 1)
-end
+-- if SQLRead("SELECT COUNT(*) as catCount FROM categories")[1].catCount == 0 then
+--     SQLWrite("INSERT INTO categories (name, orderId) VALUES (?, ?)", "Welcome", 1)
+-- end
 
-if SQLRead("SELECT COUNT(*) as chanCount FROM channels")[1].chanCount == 0 then
-    SQLWrite("INSERT INTO channels (name, orderId, categoryId) VALUES (?, ?, ?)",
-        "General", 1, 1)
-end
+-- if SQLRead("SELECT COUNT(*) as chanCount FROM channels")[1].chanCount == 0 then
+--     SQLWrite("INSERT INTO channels (name, orderId, categoryId) VALUES (?, ?, ?)",
+--         "General", 1, 1)
+-- end
 
 -- create default role if no roles exist
 -- The first role created will have roleId 1 and be the default role
@@ -182,10 +218,10 @@ Permissions = {
     MANAGE_BOTS = 1 << 12,     -- 4096
 }
 
-if SQLRead("SELECT COUNT(*) as roleCount FROM roles")[1].roleCount == 0 then
-    SQLWrite("INSERT INTO roles (name, orderId, color, permissions) VALUES (?, ?, ?, ?)",
-        "everyone", 1, "#696969", Permissions.SEND_MESSAGES)
-end
+-- if SQLRead("SELECT COUNT(*) as roleCount FROM roles")[1].roleCount == 0 then
+--     SQLWrite("INSERT INTO roles (name, orderId, color, permissions) VALUES (?, ?, ?, ?)",
+--         "everyone", 1, "#696969", Permissions.SEND_MESSAGES)
+-- end
 
 ----------------------------------------------------------------------------
 --- HELPERS
@@ -207,17 +243,23 @@ end
 -- end
 
 function GetMember(userId)
-    local member = SQLRead("SELECT * FROM members WHERE userId = ?", userId)[1]
-    if member then
-        member.roles = {}
-        local roles = SQLRead(
-            "SELECT mr.roleId FROM memberRoles mr JOIN roles r ON mr.roleId = r.roleId WHERE mr.userId = ? ORDER BY r.orderId ASC",
-            userId)
-        for _, role in ipairs(roles) do
-            table.insert(member.roles, role.roleId)
-        end
+    -- Return a copy with roles resolved to role objects; do not mutate stored state
+    local stored = members[userId]
+    if not stored then return nil end
+    local copy = {
+        userId = stored.userId,
+        nickname = stored.nickname,
+        joinedAt = stored.joinedAt,
+        roles = {}
+    }
+    for _, roleId in ipairs(stored.roles or {}) do
+        local role = GetRole(roleId)
+        if role then table.insert(copy.roles, role) end
     end
-    return member
+    table.sort(copy.roles, function(a, b)
+        return (a.orderId or 0) < (b.orderId or 0)
+    end)
+    return copy
 end
 
 function RoleHasPermission(role, permission)
@@ -247,8 +289,7 @@ function MemberHasPermission(member, permission)
     end
 
     local totalPermissions = 0
-    for _, roleId in ipairs(member.roles) do
-        local role = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    for _, role in ipairs(member.roles) do
         if role and PermissionIsValid(role.permissions) then
             -- Accumulate permissions from all roles
             totalPermissions = totalPermissions | role.permissions
@@ -331,7 +372,17 @@ end
 
 -- Get the default role for the server (roleId 1 is always the default role)
 function GetDefaultRole()
-    return SQLRead("SELECT * FROM roles WHERE roleId = 1")[1]
+    -- Prefer role with key "1"
+    if roles["1"] then return roles["1"] end
+    -- Fallback if stored under numeric key 1
+    if roles[1] then return roles[1] end
+    -- Fallback: scan for role where role.roleId == "1" or 1
+    for _, r in pairs(roles) do
+        if r and (tostring(r.roleId) == "1" or r.roleId == 1) then
+            return r
+        end
+    end
+    return nil
 end
 
 -- Ensure all members have the default role (roleId 1)
@@ -339,21 +390,26 @@ end
 function EnsureAllMembersHaveDefaultRole()
     local defaultRole = GetDefaultRole()
     if not defaultRole then
+        print("==> No default role exists")
         return 0 -- No default role exists
     end
 
-    local members = SQLRead("SELECT userId FROM members")
     local membersUpdated = 0
 
-    for _, member in ipairs(members) do
-        -- Check if member already has default role
-        local hasDefaultRole = SQLRead("SELECT * FROM memberRoles WHERE userId = ? AND roleId = 1", member.userId)
-        if #hasDefaultRole == 0 then
-            -- Assign default role to member
-            local rows = SQLWrite("INSERT INTO memberRoles (userId, roleId) VALUES (?, 1)", member.userId)
-            if rows == 1 then
-                membersUpdated = membersUpdated + 1
+    for memberId, member in pairs(members) do
+        local hasDefault = false
+        local existing = member.roles or {}
+        for _, rid in ipairs(existing) do
+            if tostring(rid) == "1" then
+                hasDefault = true
+                break
             end
+        end
+        if not hasDefault then
+            local newRoles = { "1" }
+            for _, rid in ipairs(existing) do table.insert(newRoles, rid) end
+            member.roles = newRoles
+            membersUpdated = membersUpdated + 1
         end
     end
 
@@ -389,34 +445,41 @@ end
 
 -- Helper function to resequence channels within a specific category or uncategorized channels
 function ResequenceChannels(categoryId)
-    local channels
-
-    if categoryId ~= nil then
-        channels = SQLRead([[
-            SELECT channelId FROM channels
-            WHERE categoryId = ?
-            ORDER BY orderId ASC
-        ]], categoryId)
-    else
-        channels = SQLRead([[
-            SELECT channelId FROM channels
-            WHERE categoryId IS NULL
-            ORDER BY orderId ASC
-        ]])
-    end
+    -- if categoryId ~= nil then
+    --     channels = SQLRead([[
+    --         SELECT channelId FROM channels
+    --         WHERE categoryId = ?
+    --         ORDER BY orderId ASC
+    --     ]], categoryId)
+    -- else
+    --     channels = SQLRead([[
+    --         SELECT channelId FROM channels
+    --         WHERE categoryId IS NULL
+    --         ORDER BY orderId ASC
+    --     ]])
+    -- end
 
     -- Resequence starting from 1
     for i, channel in ipairs(channels) do
+        -- if categoryId ~= nil then
+        --     SQLWrite([[
+        --         UPDATE channels SET orderId = ?
+        --         WHERE channelId = ? AND categoryId = ?
+        --     ]], i, channel.channelId, categoryId)
+        -- else
+        --     SQLWrite([[
+        --         UPDATE channels SET orderId = ?
+        --         WHERE channelId = ? AND categoryId IS NULL
+        --     ]], i, channel.channelId)
+        -- end
         if categoryId ~= nil then
-            SQLWrite([[
-                UPDATE channels SET orderId = ?
-                WHERE channelId = ? AND categoryId = ?
-            ]], i, channel.channelId, categoryId)
+            if channel.categoryId == categoryId then
+                channel.orderId = i
+            end
         else
-            SQLWrite([[
-                UPDATE channels SET orderId = ?
-                WHERE channelId = ? AND categoryId IS NULL
-            ]], i, channel.channelId)
+            if channel.categoryId == nil then
+                channel.orderId = i
+            end
         end
     end
 
@@ -425,11 +488,11 @@ end
 
 -- Helper function to resequence all categories
 function ResequenceCategories()
-    local categories = SQLRead("SELECT categoryId FROM categories ORDER BY orderId ASC")
+    -- local categories = SQLRead("SELECT categoryId FROM categories ORDER BY orderId ASC")
 
     -- Resequence starting from 1
     for i, category in ipairs(categories) do
-        SQLWrite("UPDATE categories SET orderId = ? WHERE categoryId = ?", i, category.categoryId)
+        category.orderId = i
     end
 
     return #categories
@@ -437,11 +500,15 @@ end
 
 -- Helper function to resequence all roles
 function ResequenceRoles()
-    local roles = SQLRead("SELECT roleId FROM roles ORDER BY orderId ASC")
+    -- local roles = SQLRead("SELECT roleId FROM roles ORDER BY orderId ASC")
 
     -- Resequence starting from 1
-    for i, role in ipairs(roles) do
-        SQLWrite("UPDATE roles SET orderId = ? WHERE roleId = ?", i, role.roleId)
+    for k, role in pairs(roles) do
+        if role then
+            local derivedIndex = tonumber(role.orderId) or tonumber(k) or 0
+            role.orderId = derivedIndex > 0 and derivedIndex or 1
+            role.roleId = tostring(role.roleId or k)
+        end
     end
 
     return #roles
@@ -455,7 +522,6 @@ function ResequenceCategoriesAndChannels()
     ResequenceCategories()
 
     -- Then resequence channels within each category
-    local categories = SQLRead("SELECT categoryId FROM categories")
     for _, category in ipairs(categories) do
         ResequenceChannels(category.categoryId)
     end
@@ -464,30 +530,69 @@ function ResequenceCategoriesAndChannels()
     ResequenceChannels(nil)
 end
 
+-- Ensure default ids for categories/channels at startup
+local function EnsureEntityIds()
+    for i, category in ipairs(categories) do
+        if category.categoryId == nil then category.categoryId = tostring(i) end
+        if category.orderId == nil then category.orderId = i end
+    end
+    for i, channel in ipairs(channels) do
+        if channel.channelId == nil then channel.channelId = tostring(i) end
+        if channel.orderId == nil then channel.orderId = i end
+    end
+end
+
+-- Robust channel resolver that works with both string and numeric keys
+function GetChannel(channelId)
+    if not channelId then return nil end
+    local idStr = tostring(channelId)
+
+    local channel = channels[idStr]
+    return channel
+end
+
+-- Robust category resolver similar to GetChannel
+function GetCategory(categoryId)
+    if not categoryId then return nil end
+    local idStr = tostring(categoryId)
+    local category = categories[idStr]
+    return category
+end
+
+function GetRole(roleId)
+    if not roleId then return nil end
+    local idStr = tostring(roleId)
+    local role = roles[idStr]
+    return role
+end
+
 function SyncProcessState()
     -- This function is used to take all the possible data and couple it into
     -- a single table which will be stored in Hyperbeams state for quick access.
     -- Everything must be in a JSON like structure
     -- This function should be called everytime after a change is made to the server
 
-    local membersArranged = GetAllMembers()
+    EnsureEntityIds()
 
     local state = {
-        info = {
+        serverinfo = {
             name = Name,
             logo = Logo,
             description = Description,
             owner = Owner,
             publicServer = PublicServer,
             version = Version_,
-            denomination = Denomination,
             ticker = Ticker,
-            categories = SQLRead("SELECT * FROM categories ORDER BY orderId ASC"),
-            channels = SQLRead("SELECT * FROM channels ORDER BY orderId ASC"),
-            roles = SQLRead("SELECT * FROM roles ORDER BY orderId ASC"),
-            memberCount = SQLRead("SELECT COUNT(*) as memberCount FROM members")[1].memberCount,
+            categories = categories,
+            channels = channels,
+            roles = roles,
+            memberCount = MemberCount,
+            bots = bots,
+            subscribedBots = SubscribedBots,
         },
-        members = membersArranged,
+        members = members,
+        messages = messages,
+        events = events,
     }
 
     -- Special message to the patch device which will update the cache in hyperbeam nodes
@@ -498,65 +603,14 @@ function SyncProcessState()
     })
 end
 
+-- make sure state is synced on startup
+InitialSync = InitialSync or 'INCOMPLETE'
+if InitialSync == 'INCOMPLETE' then
+    SyncProcessState()
+    InitialSync = 'COMPLETE'
+end
+
 ----------------------------------------------------------------------------
-
-Handlers.add("Info", function(msg)
-    local categories = SQLRead("SELECT * FROM categories ORDER BY orderId ASC")
-    local channels = SQLRead("SELECT * FROM channels ORDER BY orderId ASC")
-    local roles = SQLRead("SELECT * FROM roles ORDER BY orderId ASC")
-
-    local memberCount = SQLRead("SELECT COUNT(*) as memberCount FROM members")[1].memberCount
-
-    msg.reply({
-        Action = "Info-Response",
-        Name = Name,
-        Logo = Logo,
-        Description = Description,
-        Owner_ = Owner,
-        Categories = json.encode(categories),
-        Channels = json.encode(channels),
-        Roles = json.encode(roles),
-        PublicServer = tostring(PublicServer),
-        MemberCount = tostring(memberCount),
-        Version = tostring(Version_),
-        -- IGNORE REST
-        Denomination = tostring(Denomination),
-        Ticker = Ticker,
-        Status = "200"
-    })
-end)
-
--- handlers to make this token compatible
-Handlers.add("Balance", function(msg)
-    local bal = 0
-
-    if msg.Tags.Recipient then
-        bal = Balances[msg.Tags.Recipient] or 0
-    else
-        bal = Balances[msg.From] or 0
-    end
-
-    msg.reply({
-        Balance = bal,
-        Ticker = Ticker,
-        Account = msg.Tags.Recipient or msg.From,
-        Data = bal
-    })
-end)
-
-Handlers.add("Balances", function(msg)
-    msg.reply({ Data = json.encode(Balances) })
-end)
-
-Handlers.add("Total-Supply", function(msg)
-    msg.reply({
-        Action = 'Total-Supply',
-        Data = tostring(TotalSupply),
-        Ticker = Ticker
-    })
-end)
-
----------------------
 
 Handlers.add("Join-Server", function(msg)
     local userId = msg.From
@@ -582,52 +636,21 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
+    member = {
+        userId = userId,
+        nickname = nil,
+        joinedAt = joinedAt,
+        roles = { "1" } -- default role
+    }
+    members[userId] = member
+    -- Increment member counter
+    MemberCount = MemberCount + 1
 
-    -- Add user to server members
-    local rows = SQLWrite("INSERT INTO members (userId, joinedAt) VALUES (?, ?)", userId, joinedAt)
-    if rows ~= 1 then
-        success = false
-    end
-
-    -- Assign default role to new member
-    local defaultRole = GetDefaultRole()
-    if success and defaultRole then
-        local roleRows = SQLWrite("INSERT INTO memberRoles (userId, roleId) VALUES (?, ?)", userId, defaultRole.roleId)
-        if roleRows ~= 1 then
-            success = false
-        end
-    end
-
-    if success then
-        db:exec("COMMIT")
-
-        -- Notify subspace that user has joined
-        ao.send({
-            Target = Subspace,
-            Action = "User-Joined-Server",
-            Tags = {
-                UserId = userId,
-                ServerId = ao.id
-            }
-        })
-
-        msg.reply({
-            Action = "Join-Server-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Join-Server-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to join server"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Join-Server-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Leave-Server", function(msg)
@@ -653,46 +676,14 @@ Handlers.add("Leave-Server", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
-
-    -- Remove member roles
-    local rolesDeleted = SQLWrite("DELETE FROM memberRoles WHERE userId = ?", userId)
-
-    -- Remove member
-    local rows = SQLWrite("DELETE FROM members WHERE userId = ?", userId)
-    if rows ~= 1 then
-        success = false
-    end
-
-    if success then
-        db:exec("COMMIT")
-
-        -- Notify subspace that user has left
-        ao.send({
-            Target = Subspace,
-            Action = "User-Left-Server",
-            Tags = {
-                UserId = userId,
-                ServerId = ao.id
-            }
-        })
-
-        msg.reply({
-            Action = "Leave-Server-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Leave-Server-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to leave server"
-            })
-        })
-    end
+    members[userId] = nil
+    -- Decrement member counter
+    if MemberCount > 0 then MemberCount = MemberCount - 1 end
+    msg.reply({
+        Action = "Leave-Server-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Update-Server", function(msg)
@@ -700,7 +691,7 @@ Handlers.add("Update-Server", function(msg)
     local name = VarOrNil(msg.Tags.Name)
     local logo = VarOrNil(msg.Tags.Logo)
     local description = VarOrNil(msg.Tags.Description)
-    local publicServer = VarOrNil(msg.Tags.PublicServer)
+    local publicServer = VarOrNil(msg.Tags["Public-Server"])
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_SERVER)
     if ValidateCondition(not hasPermission, msg, {
@@ -727,7 +718,7 @@ Handlers.add("Update-Server", function(msg)
         ao.send({
             Action = "Update-Server",
             Tags = {
-                PublicServer = tostring(PublicServer)
+                ["Public-Server"] = tostring(PublicServer)
             }
         })
     end
@@ -736,6 +727,7 @@ Handlers.add("Update-Server", function(msg)
         Action = "Update-Server-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
@@ -744,9 +736,9 @@ end)
 Handlers.add("Create-Category", function(msg)
     local userId = msg.From
     local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags.AllowMessaging) or 1
-    local allowAttachments = VarOrNil(msg.Tags.AllowAttachments) or 1
-    local orderId = VarOrNil(msg.Tags.OrderId)
+    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"]) or 1
+    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"]) or 1
+    local orderId = VarOrNil(msg.Tags["Order-Id"])
 
     allowMessaging = tonumber(allowMessaging)
     allowAttachments = tonumber(allowAttachments)
@@ -762,68 +754,29 @@ Handlers.add("Create-Category", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
+    local newCategory = {
+        categoryId = tostring(#categories + 1),
+        name = name,
+        orderId = orderId or (#categories + 1),
+        allowMessaging = allowMessaging,
+        allowAttachments = allowAttachments
+    }
+    categories[#categories + 1] = newCategory
 
-    -- Determine order position
-    local new_orderId
-    if orderId then
-        new_orderId = orderId
-        -- Make room for new category
-        SQLWrite([[
-            UPDATE categories SET orderId = orderId + 1
-            WHERE orderId >= ?
-        ]], orderId)
-    else
-        -- Place at end
-        local maxOrderId = SQLRead("SELECT MAX(orderId) as maxOrder FROM categories")[1]
-        new_orderId = 1
-        if maxOrderId and maxOrderId.maxOrder then
-            new_orderId = maxOrderId.maxOrder + 1
-        end
-    end
-
-    -- Insert new category
-    local rows = SQLWrite([[
-        INSERT INTO categories (name, orderId, allowMessaging, allowAttachments)
-        VALUES (?, ?, ?, ?)
-    ]], name, new_orderId, allowMessaging, allowAttachments)
-
-    if rows ~= 1 then
-        success = false
-    end
-
-    -- Resequence to ensure clean ordering
-    if success then
-        ResequenceCategories()
-    end
-
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Create-Category-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Create-Category-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to create category"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Create-Category-Response",
+        Status = "200"
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Update-Category", function(msg)
     local userId = msg.From
-    local categoryId = VarOrNil(msg.Tags.CategoryId)
+    local categoryId = VarOrNil(msg.Tags["Category-Id"])
     local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags.AllowMessaging)
-    local allowAttachments = VarOrNil(msg.Tags.AllowAttachments)
-    local orderId = VarOrNil(msg.Tags.OrderId)
+    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"])
+    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"])
+    local orderId = VarOrNil(msg.Tags["Order-Id"])
 
     if allowMessaging then allowMessaging = tonumber(allowMessaging) end
     if allowAttachments then allowAttachments = tonumber(allowAttachments) end
@@ -839,7 +792,7 @@ Handlers.add("Update-Category", function(msg)
         return
     end
 
-    local category = SQLRead("SELECT * FROM categories WHERE categoryId = ?", categoryId)[1]
+    local category, categoryStorageKey = GetCategory(categoryId)
     if ValidateCondition(not category, msg, {
             Status = "400",
             Data = json.encode({
@@ -848,10 +801,6 @@ Handlers.add("Update-Category", function(msg)
         }) then
         return
     end
-
-    -- Begin transaction for atomic updates
-    db:exec("BEGIN TRANSACTION")
-    local success = true
 
     -- Get current values
     local current_order = category.orderId
@@ -864,58 +813,44 @@ Handlers.add("Update-Category", function(msg)
     if orderId and orderId ~= current_order then
         if orderId < current_order then
             -- Moving up: shift other categories down
-            SQLWrite([[
-                UPDATE categories
-                SET orderId = orderId + 1
-                WHERE orderId >= ? AND orderId < ? AND categoryId != ?
-            ]], orderId, current_order, categoryId)
+            for i, category in ipairs(categories) do
+                if category.orderId >= orderId and category.orderId < current_order and category.categoryId ~= categoryId then
+                    category.orderId = category.orderId + 1
+                end
+            end
         else
             -- Moving down: shift other categories up
-            SQLWrite([[
-                UPDATE categories
-                SET orderId = orderId - 1
-                WHERE orderId > ? AND orderId <= ? AND categoryId != ?
-            ]], current_order, orderId, categoryId)
+            for i, category in ipairs(categories) do
+                if category.orderId > current_order and category.orderId <= orderId and category.categoryId ~= categoryId then
+                    category.orderId = category.orderId - 1
+                end
+            end
         end
     end
 
     -- Update the category
-    local rows = SQLWrite([[
-        UPDATE categories
-        SET name = ?, allowMessaging = ?, allowAttachments = ?, orderId = ?
-        WHERE categoryId = ?
-    ]], new_name, new_allowMessaging, new_allowAttachments, new_orderId, categoryId)
+    category.name = new_name
+    category.allowMessaging = new_allowMessaging
+    category.allowAttachments = new_allowAttachments
+    category.orderId = new_orderId
 
-    if rows ~= 1 then
-        success = false
+    if categoryStorageKey ~= nil then
+        categories[categoryStorageKey] = category
     end
 
     -- Resequence to ensure clean ordering
-    if success then
-        ResequenceCategories()
-    end
+    ResequenceCategories()
 
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Update-Category-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Update-Category-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to update category"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Update-Category-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Delete-Category", function(msg)
     local userId = msg.From
-    local categoryId = VarOrNil(msg.Tags.CategoryId)
+    local categoryId = VarOrNil(msg.Tags["Category-Id"])
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
@@ -927,7 +862,7 @@ Handlers.add("Delete-Category", function(msg)
         return
     end
 
-    local category = SQLRead("SELECT * FROM categories WHERE categoryId = ?", categoryId)[1]
+    local category, categoryStorageKey = GetCategory(categoryId)
     if ValidateCondition(not category, msg, {
             Status = "400",
             Data = json.encode({
@@ -937,45 +872,27 @@ Handlers.add("Delete-Category", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
-
     -- Move all channels from this category to uncategorized
-    local channels_updated = SQLWrite("UPDATE channels SET categoryId = NULL WHERE categoryId = ?", categoryId)
+    for _, channel in ipairs(channels) do
+        if channel.categoryId == categoryId then
+            channel.categoryId = nil
+        end
+    end
 
     -- Delete the category
-    local rows = SQLWrite("DELETE FROM categories WHERE categoryId = ?", categoryId)
-
-    if rows ~= 1 then
-        success = false
+    if categoryStorageKey ~= nil then
+        categories[categoryStorageKey] = nil
     end
 
     -- Resequence categories and affected channels
-    if success then
-        ResequenceCategories()
-        ResequenceChannels(nil) -- Resequence uncategorized channels
-    end
+    ResequenceCategories()
+    ResequenceChannels(nil) -- Resequence uncategorized channels
 
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Delete-Category-Response",
-            Status = "200",
-            Data = json.encode({
-                channelsMovedToUncategorized = channels_updated
-            })
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Delete-Category-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to delete category"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Delete-Category-Response",
+        Status = "200"
+    })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
@@ -984,15 +901,15 @@ end)
 Handlers.add("Create-Channel", function(msg)
     local userId = msg.From
     local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags.AllowMessaging) or 1
-    local allowAttachments = VarOrNil(msg.Tags.AllowAttachments) or 1
-    local categoryId = VarOrNil(msg.Tags.CategoryId)
-    local orderId = VarOrNil(msg.Tags.OrderId)
+    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"]) or 1
+    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"]) or 1
+    local categoryId = VarOrNil(msg.Tags["Category-Id"])
+    local orderId = VarOrNil(msg.Tags["Order-Id"])
 
     allowMessaging = tonumber(allowMessaging)
     allowAttachments = tonumber(allowAttachments)
-    if categoryId then categoryId = tonumber(categoryId) end
-    if orderId then orderId = tonumber(orderId) end
+    -- categoryId must be string storage key
+    if categoryId then categoryId = tostring(categoryId) end
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
@@ -1004,91 +921,48 @@ Handlers.add("Create-Channel", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
-
-    -- Determine order position
-    local new_orderId
-    if orderId then
-        new_orderId = orderId
-        -- Make room for new channel in the specified category
-        if categoryId then
-            SQLWrite([[
-                UPDATE channels SET orderId = orderId + 1
-                WHERE categoryId = ? AND orderId >= ?
-            ]], categoryId, orderId)
-        else
-            SQLWrite([[
-                UPDATE channels SET orderId = orderId + 1
-                WHERE categoryId IS NULL AND orderId >= ?
-            ]], orderId)
-        end
-    else
-        -- Place at end of category/uncategorized
-        if categoryId then
-            local maxOrderId = SQLRead([[
-                SELECT MAX(orderId) as maxOrder FROM channels
-                WHERE categoryId = ?
-            ]], categoryId)[1]
-            new_orderId = 1
-            if maxOrderId and maxOrderId.maxOrder then
-                new_orderId = maxOrderId.maxOrder + 1
-            end
-        else
-            local maxOrderId = SQLRead([[
-                SELECT MAX(orderId) as maxOrder FROM channels
-                WHERE categoryId IS NULL
-            ]])[1]
-            new_orderId = 1
-            if maxOrderId and maxOrderId.maxOrder then
-                new_orderId = maxOrderId.maxOrder + 1
-            end
+    local category = nil
+    if categoryId then
+        category = GetCategory(categoryId)
+        if ValidateCondition(not category, msg, {
+                Status = "400",
+                Data = json.encode({
+                    error = "Category not found"
+                })
+            }) then
+            return
         end
     end
 
-    -- Insert new channel
-    local rows = SQLWrite([[
-        INSERT INTO channels (name, orderId, categoryId, allowMessaging, allowAttachments)
-        VALUES (?, ?, ?, ?, ?)
-    ]], name, new_orderId, categoryId, allowMessaging, allowAttachments)
+    local channelId = #channels + 1
+    local newChannel = {
+        channelId = tostring(channelId),
+        name = name,
+        orderId = channelId, -- ensures the channel is at the end of the category
+        categoryId = categoryId,
+        allowMessaging = allowMessaging or 1,
+        allowAttachments = allowAttachments or 1
+    }
+    channels[channelId] = newChannel
 
-    if rows ~= 1 then
-        success = false
-    end
+    ResequenceCategoriesAndChannels()
 
-    -- Resequence to ensure clean ordering
-    if success then
-        ResequenceChannels(categoryId)
-    end
-
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Create-Channel-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Create-Channel-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to create channel"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Create-Channel-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Update-Channel", function(msg)
     local userId = msg.From
-    local channelId = VarOrNil(msg.Tags.ChannelId)
+    local channelId = VarOrNil(msg.Tags["Channel-Id"])
     local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags.AllowMessaging)
-    local allowAttachments = VarOrNil(msg.Tags.AllowAttachments)
-    local categoryIdRaw = msg.Tags.CategoryId -- Get raw value first
-    local categoryId = VarOrNil(msg.Tags.CategoryId)
-    local orderId = VarOrNil(msg.Tags.OrderId)
+    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"])
+    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"])
+    local categoryIdRaw = msg.Tags["Category-Id"] -- Get raw value first
+    local categoryId = VarOrNil(msg.Tags["Category-Id"])
+    local orderId = VarOrNil(msg.Tags["Order-Id"])
 
     if allowMessaging then allowMessaging = tonumber(allowMessaging) end
     if allowAttachments then allowAttachments = tonumber(allowAttachments) end
@@ -1104,7 +978,9 @@ Handlers.add("Update-Channel", function(msg)
         return
     end
 
-    local channel = SQLRead("SELECT * FROM channels WHERE channelId = ?", channelId)[1]
+    -- Channel id must be treated as string
+    if channelId then channelId = tostring(channelId) end
+    local channel, storageKey = GetChannel(channelId)
     if ValidateCondition(not channel, msg, {
             Status = "400",
             Data = json.encode({
@@ -1113,10 +989,6 @@ Handlers.add("Update-Channel", function(msg)
         }) then
         return
     end
-
-    -- Begin transaction for atomic updates
-    db:exec("BEGIN TRANSACTION")
-    local success = true
 
     -- Get current values
     local current_categoryId = channel.categoryId
@@ -1127,12 +999,8 @@ Handlers.add("Update-Channel", function(msg)
 
     -- Determine target category
     local target_categoryId = current_categoryId
-    if categoryIdRaw ~= nil then    -- Check raw value instead of processed value
-        if categoryIdRaw == "" then
-            target_categoryId = nil -- Moving to uncategorized
-        else
-            target_categoryId = tonumber(categoryIdRaw)
-        end
+    if categoryId then
+        target_categoryId = categoryId
     end
 
     -- Check if we're changing category
@@ -1145,22 +1013,26 @@ Handlers.add("Update-Channel", function(msg)
     elseif changing_category then
         -- When changing category without specifying order, place at end
         if target_categoryId then
-            local max_order = SQLRead([[
-                SELECT MAX(orderId) as maxOrder FROM channels
-                WHERE categoryId = ?
-            ]], target_categoryId)
+            local max_order = 0
+            for _, channel in ipairs(channels) do
+                if channel.categoryId == target_categoryId then
+                    max_order = math.max(max_order, channel.orderId)
+                end
+            end
             new_orderId = 1
-            if max_order and #max_order > 0 and max_order[1].maxOrder then
-                new_orderId = max_order[1].maxOrder + 1
+            if max_order then
+                new_orderId = max_order + 1
             end
         else
-            local max_order = SQLRead([[
-                SELECT MAX(orderId) as maxOrder FROM channels
-                WHERE categoryId IS NULL
-            ]])
+            local max_order = 0
+            for _, channel in ipairs(channels) do
+                if channel.categoryId == nil then
+                    max_order = math.max(max_order, channel.orderId)
+                end
+            end
             new_orderId = 1
-            if max_order and #max_order > 0 and max_order[1].maxOrder then
-                new_orderId = max_order[1].maxOrder + 1
+            if max_order then
+                new_orderId = max_order + 1
             end
         end
     end
@@ -1168,110 +1040,94 @@ Handlers.add("Update-Channel", function(msg)
     -- Handle category change: remove from old category's ordering
     if changing_category then
         if current_categoryId then
-            SQLWrite([[
-                UPDATE channels
-                SET orderId = orderId - 1
-                WHERE categoryId = ? AND orderId > ?
-            ]], current_categoryId, current_order)
+            for _, channel in ipairs(channels) do
+                if channel.categoryId == current_categoryId and channel.orderId > current_order then
+                    channel.orderId = channel.orderId - 1
+                end
+            end
         else
-            SQLWrite([[
-                UPDATE channels
-                SET orderId = orderId - 1
-                WHERE categoryId IS NULL AND orderId > ?
-            ]], current_order)
+            -- SQLWrite([[
+            --     UPDATE channels
+            --     SET orderId = orderId - 1
+            --     WHERE categoryId IS NULL AND orderId > ?
+            -- ]], current_order)
+            for _, channel in ipairs(channels) do
+                if channel.categoryId == nil and channel.orderId > current_order then
+                    channel.orderId = channel.orderId - 1
+                end
+            end
         end
 
         -- Make room in target category
         if target_categoryId then
-            SQLWrite([[
-                UPDATE channels
-                SET orderId = orderId + 1
-                WHERE categoryId = ? AND orderId >= ?
-            ]], target_categoryId, new_orderId)
+            for _, channel in ipairs(channels) do
+                if channel.categoryId == target_categoryId and channel.orderId >= new_orderId then
+                    channel.orderId = channel.orderId + 1
+                end
+            end
         else
-            SQLWrite([[
-                UPDATE channels
-                SET orderId = orderId + 1
-                WHERE categoryId IS NULL AND orderId >= ?
-            ]], new_orderId)
+            for _, channel in ipairs(channels) do
+                if channel.categoryId == nil and channel.orderId >= new_orderId then
+                    channel.orderId = channel.orderId + 1
+                end
+            end
         end
     elseif orderId and orderId ~= current_order then
         -- Handle ordering within same category
         if orderId < current_order then
             -- Moving up: shift others down
             if current_categoryId then
-                SQLWrite([[
-                    UPDATE channels
-                    SET orderId = orderId + 1
-                    WHERE categoryId = ? AND orderId >= ? AND orderId < ? AND channelId != ?
-                ]], current_categoryId, orderId, current_order, channelId)
+                for _, channel in ipairs(channels) do
+                    if channel.categoryId == current_categoryId and channel.orderId >= orderId and channel.orderId < current_order and channel.channelId ~= channelId then
+                        channel.orderId = channel.orderId + 1
+                    end
+                end
             else
-                SQLWrite([[
-                    UPDATE channels
-                    SET orderId = orderId + 1
-                    WHERE categoryId IS NULL AND orderId >= ? AND orderId < ? AND channelId != ?
-                ]], orderId, current_order, channelId)
+                for _, channel in ipairs(channels) do
+                    if channel.categoryId == nil and channel.orderId >= orderId and channel.orderId < current_order and channel.channelId ~= channelId then
+                        channel.orderId = channel.orderId + 1
+                    end
+                end
             end
         else
             -- Moving down: shift others up
             if current_categoryId then
-                SQLWrite([[
-                    UPDATE channels
-                    SET orderId = orderId - 1
-                    WHERE categoryId = ? AND orderId > ? AND orderId <= ? AND channelId != ?
-                ]], current_categoryId, current_order, orderId, channelId)
+                for _, channel in ipairs(channels) do
+                    if channel.categoryId == current_categoryId and channel.orderId > current_order and channel.orderId <= orderId and channel.channelId ~= channelId then
+                        channel.orderId = channel.orderId - 1
+                    end
+                end
             else
-                SQLWrite([[
-                    UPDATE channels
-                    SET orderId = orderId - 1
-                    WHERE categoryId IS NULL AND orderId > ? AND orderId <= ? AND channelId != ?
-                ]], current_order, orderId, channelId)
+                for _, channel in ipairs(channels) do
+                    if channel.categoryId == nil and channel.orderId > current_order and channel.orderId <= orderId and channel.channelId ~= channelId then
+                        channel.orderId = channel.orderId - 1
+                    end
+                end
             end
         end
     end
 
-    local rows = SQLWrite([[
-        UPDATE channels
-        SET name = ?, allowMessaging = ?, allowAttachments = ?, categoryId = ?, orderId = ?
-        WHERE channelId = ?
-    ]], new_name, new_allowMessaging, new_allowAttachments, target_categoryId, new_orderId, channelId)
+    channel.name = new_name
+    channel.allowMessaging = new_allowMessaging
+    channel.allowAttachments = new_allowAttachments
+    channel.categoryId = target_categoryId
+    channel.orderId = new_orderId
+
+    channels[channelId] = channel
 
 
-    if rows ~= 1 then
-        success = false
-    end
+    ResequenceCategoriesAndChannels()
 
-    -- Resequence affected categories
-    if success then
-        if changing_category then
-            ResequenceChannels(current_categoryId)
-            ResequenceChannels(target_categoryId)
-        else
-            ResequenceChannels(current_categoryId)
-        end
-    end
-
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Update-Channel-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Update-Channel-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to update channel"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Update-Channel-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Delete-Channel", function(msg)
     local userId = msg.From
-    local channelId = VarOrNil(msg.Tags.ChannelId)
+    local channelId = VarOrNil(msg.Tags["Channel-Id"])
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
@@ -1283,7 +1139,8 @@ Handlers.add("Delete-Channel", function(msg)
         return
     end
 
-    local channel = SQLRead("SELECT * FROM channels WHERE channelId = ?", channelId)[1]
+    if channelId then channelId = tonumber(channelId) end
+    local channel = GetChannel(channelId)
     if ValidateCondition(not channel, msg, {
             Status = "400",
             Data = json.encode({
@@ -1293,57 +1150,55 @@ Handlers.add("Delete-Channel", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
-
-    local channel_categoryId = channel.categoryId
+    local channel_categoryId = channel.categoryId and tostring(channel.categoryId) or nil
 
     -- Delete all messages in the channel
-    local messages_deleted = SQLWrite("DELETE FROM messages WHERE channelId = ?", channelId)
+    messages[tostring(channelId)] = nil
 
     -- Delete the channel
-    local rows = SQLWrite("DELETE FROM channels WHERE channelId = ?", channelId)
-
-    if rows ~= 1 then
-        success = false
+    if storageKey ~= nil then
+        channels[storageKey] = nil
+    else
+        channels[tostring(channelId)] = nil
     end
 
     -- Resequence channels in the affected category
-    if success then
-        ResequenceChannels(channel_categoryId)
-    end
+    ResequenceChannels(channel_categoryId)
 
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Delete-Channel-Response",
-            Status = "200",
-            Data = json.encode({
-                messagesDeleted = messages_deleted
-            })
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Delete-Channel-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to delete channel"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Delete-Channel-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
 --- ROLES
+
+-- Generate the next roleId by scanning existing roles table keys and role objects
+local function GetNextRoleId()
+    local maxId = 0
+    for key, role in pairs(roles) do
+        local candidate = nil
+        if type(key) == "string" or type(key) == "number" then
+            candidate = tonumber(key)
+        end
+        if not candidate and role and role.roleId then
+            candidate = tonumber(role.roleId)
+        end
+        if candidate and candidate > maxId then
+            maxId = candidate
+        end
+    end
+    return tostring(maxId + 1)
+end
 
 Handlers.add("Create-Role", function(msg)
     local userId = msg.From
     local name = VarOrNil(msg.Tags.Name) or "New Role"
     local color = VarOrNil(msg.Tags.Color) or "#696969"
     local permissions = VarOrNil(msg.Tags.Permissions) or 1
-    local orderId = VarOrNil(msg.Tags.OrderId)
+    local orderId = VarOrNil(msg.Tags["Order-Id"])
 
     if permissions then permissions = tonumber(permissions) end
     if orderId then orderId = tonumber(orderId) end
@@ -1368,72 +1223,70 @@ Handlers.add("Create-Role", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
-
     -- Determine order position
     local new_orderId
     if orderId then
         new_orderId = orderId
         -- Make room for new role
-        SQLWrite([[
-            UPDATE roles SET orderId = orderId + 1
-            WHERE orderId >= ?
-        ]], orderId)
+        for _, role in pairs(roles) do
+            if role and role.orderId and role.orderId >= orderId then
+                role.orderId = role.orderId + 1
+            end
+        end
     else
         -- Place at end
-        local maxOrderId = SQLRead("SELECT MAX(orderId) as maxOrder FROM roles")[1]
+        local maxOrderId = 0
+        for _, role in pairs(roles) do
+            if role and role.orderId then
+                maxOrderId = math.max(maxOrderId, role.orderId)
+            end
+        end
         new_orderId = 1
-        if maxOrderId and maxOrderId.maxOrder then
-            new_orderId = maxOrderId.maxOrder + 1
+        if maxOrderId then
+            new_orderId = maxOrderId + 1
         end
     end
 
-    -- Insert new role
-    local rows = SQLWrite([[
-        INSERT INTO roles (name, color, permissions, orderId)
-        VALUES (?, ?, ?, ?)
-    ]], name, color, permissions, new_orderId)
-
-    if rows ~= 1 then
-        success = false
-    end
+    -- Insert new role with robust roleId generation (roles is a map/table)
+    local roleId = GetNextRoleId()
+    roles[roleId] = {
+        roleId = roleId,
+        name = name,
+        color = color,
+        permissions = permissions,
+        orderId = new_orderId
+    }
 
     -- Resequence to ensure clean ordering
-    if success then
-        ResequenceRoles()
-    end
+    ResequenceRoles()
 
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Create-Role-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Create-Role-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to create role"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Create-Role-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Update-Role", function(msg)
     local userId = msg.From
-    local roleId = VarOrNil(msg.Tags.RoleId)
+    local roleId = VarOrNil(msg.Tags["Role-Id"])
     local name = VarOrNil(msg.Tags.Name)
     local color = VarOrNil(msg.Tags.Color)
     local permissions = VarOrNil(msg.Tags.Permissions)
-    local orderId = VarOrNil(msg.Tags.OrderId)
+    local orderId = VarOrNil(msg.Tags["Order-Id"])
 
     if permissions then permissions = tonumber(permissions) end
     if orderId then orderId = tonumber(orderId) end
-    if roleId then roleId = tonumber(roleId) end
+    if roleId then roleId = tostring(roleId) end
+
+    if ValidateCondition(not roleId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Role ID is required"
+            })
+        }) then
+        return
+    end
 
     -- Validate permissions if provided
     if permissions and ValidateCondition(not PermissionIsValid(permissions), msg, {
@@ -1455,7 +1308,7 @@ Handlers.add("Update-Role", function(msg)
         return
     end
 
-    local role = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    local role = GetRole(roleId)
     if ValidateCondition(not role, msg, {
             Status = "400",
             Data = json.encode({
@@ -1465,11 +1318,6 @@ Handlers.add("Update-Role", function(msg)
         return
     end
 
-
-
-    -- Begin transaction for atomic updates
-    db:exec("BEGIN TRANSACTION")
-    local success = true
 
     -- Get current values
     local current_order = role.orderId
@@ -1482,60 +1330,50 @@ Handlers.add("Update-Role", function(msg)
     if orderId and orderId ~= current_order then
         if orderId < current_order then
             -- Moving up: shift other roles down
-            SQLWrite([[
-                UPDATE roles
-                SET orderId = orderId + 1
-                WHERE orderId >= ? AND orderId < ? AND roleId != ?
-            ]], orderId, current_order, roleId)
+            for _, role in pairs(roles) do
+                if role and role.orderId and role.orderId >= orderId and role.orderId < current_order and tostring(role.roleId) ~= tostring(roleId) then
+                    role.orderId = role.orderId + 1
+                end
+            end
         else
             -- Moving down: shift other roles up
-            SQLWrite([[
-                UPDATE roles
-                SET orderId = orderId - 1
-                WHERE orderId > ? AND orderId <= ? AND roleId != ?
-            ]], current_order, orderId, roleId)
+            for _, role in pairs(roles) do
+                if role and role.orderId and role.orderId > current_order and role.orderId <= orderId and tostring(role.roleId) ~= tostring(roleId) then
+                    role.orderId = role.orderId - 1
+                end
+            end
         end
     end
 
     -- Update the role
-    local rows = SQLWrite([[
-        UPDATE roles
-        SET name = ?, color = ?, permissions = ?, orderId = ?
-        WHERE roleId = ?
-    ]], new_name, new_color, new_permissions, new_orderId, roleId)
-
-    if rows ~= 1 then
-        success = false
-    end
+    role.name = new_name
+    role.color = new_color
+    role.permissions = new_permissions
+    role.orderId = new_orderId
 
     -- Resequence to ensure clean ordering
-    if success then
-        ResequenceRoles()
-    end
+    ResequenceRoles()
 
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Update-Role-Response",
-            Status = "200",
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Update-Role-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to update role"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Update-Role-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Delete-Role", function(msg)
     local userId = msg.From
-    local roleId = VarOrNil(msg.Tags.RoleId)
+    local roleId = VarOrNil(msg.Tags["Role-Id"])
 
-    if roleId then roleId = tonumber(roleId) end
+    if roleId then roleId = tostring(roleId) end
+    if ValidateCondition(not roleId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Role ID is required"
+            })
+        }) then
+        return
+    end
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
@@ -1547,7 +1385,7 @@ Handlers.add("Delete-Role", function(msg)
         return
     end
 
-    local role = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    local role = GetRole(roleId)
     if ValidateCondition(not role, msg, {
             Status = "400",
             Data = json.encode({
@@ -1567,114 +1405,78 @@ Handlers.add("Delete-Role", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
-
-    -- Remove this role from all members who have it
-    local members = SQLRead("SELECT * FROM members")
-    local membersUpdated = 0
-
-    for _, member in ipairs(members) do
-        local memberRoles = SQLRead("SELECT * FROM memberRoles WHERE userId = ? AND roleId = ?", member.userId, roleId)
-        if #memberRoles > 0 then
-            local removed = SQLWrite("DELETE FROM memberRoles WHERE userId = ? AND roleId = ?", member.userId, roleId)
-            membersUpdated = membersUpdated + removed
+    -- Remove this role from all members who have it (by value)
+    local membersWithRole = role_member_mapping[roleId] or {}
+    for memberId, _ in pairs(membersWithRole) do
+        local member = members[memberId]
+        if member then
+            local newRoles = {}
+            for _, rid in ipairs(member.roles) do
+                if rid ~= roleId then table.insert(newRoles, rid) end
+            end
+            member.roles = newRoles
         end
     end
+    role_member_mapping[roleId] = nil
+
+    -- for _, member in pairs(members) do
+    --     if member.roles then
+    --         local newRoles = {}
+    --         for _, rid in ipairs(member.roles) do
+    --             if rid ~= roleId then table.insert(newRoles, rid) end
+    --         end
+    --         member.roles = newRoles
+    --     end
+    -- end
 
     -- Delete the role
-    local rows = SQLWrite("DELETE FROM roles WHERE roleId = ?", roleId)
-
-    if rows ~= 1 then
-        success = false
-    end
+    roles[roleId] = nil
 
     -- Resequence roles to fill the gap
-    if success then
-        ResequenceRoles()
-    end
+    ResequenceRoles()
 
-    if success then
-        db:exec("COMMIT")
-        msg.reply({
-            Action = "Delete-Role-Response",
-            Status = "200",
-            Data = json.encode({
-                membersUpdated = membersUpdated
-            })
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Delete-Role-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to delete role"
-            })
-        })
-    end
+    msg.reply({
+        Action = "Delete-Role-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
 --- MEMBERS
 
-Handlers.add("Get-Member", function(msg)
-    local userId = VarOrNil(msg.Tags.UserId) or msg.From
+-- Handlers.add("Get-Member", function(msg)
+--     local userId = VarOrNil(msg.Tags.UserId) or msg.From
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User is not a member of this server"
-            })
-        }) then
-        return
-    end
+--     local member = GetMember(userId)
+--     if ValidateCondition(not member, msg, {
+--             Status = "400",
+--             Data = json.encode({
+--                 error = "User is not a member of this server"
+--             })
+--         }) then
+--         return
+--     end
 
-    msg.reply({
-        Action = "Get-Member-Response",
-        Member = json.encode(member)
-    })
-end)
+--     msg.reply({
+--         Action = "Get-Member-Response",
+--         Member = json.encode(member)
+--     })
+-- end)
 
-function GetAllMembers()
-    local membersWithRoles = SQLRead([[
-        SELECT m.userId, m.nickname, mr.roleId, m.joinedAt
-        FROM members m
-        LEFT JOIN memberRoles mr ON m.userId = mr.userId
-    ]])
+-- Handlers.add("Get-All-Members", function(msg)
+--     local membersArranged = GetAllMembers()
 
-    local membersArranged = {}
-    for _, row in ipairs(membersWithRoles) do
-        if not membersArranged[row.userId] then
-            membersArranged[row.userId] = {
-                nickname = row.nickname,
-                joinedAt = row.joinedAt,
-                roles = {}
-            }
-        end
-        if row.roleId then
-            table.insert(membersArranged[row.userId].roles, row.roleId)
-        end
-    end
-
-    return membersArranged
-end
-
-Handlers.add("Get-All-Members", function(msg)
-    local membersArranged = GetAllMembers()
-
-    msg.reply({
-        Action = "Get-Members-Response",
-        Status = "200",
-        Data = json.encode(membersArranged)
-    })
-end)
+--     msg.reply({
+--         Action = "Get-Members-Response",
+--         Status = "200",
+--         Data = json.encode(membersArranged)
+--     })
+-- end)
 
 Handlers.add("Update-Member", function(msg)
     local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags.TargetUserId)
+    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
     local nickname = msg.Tags.Nickname -- Don't use VarOrNil here to allow empty strings
 
     -- Check if updating own profile or others
@@ -1726,26 +1528,22 @@ Handlers.add("Update-Member", function(msg)
             nicknameValue = nickname
         end
 
-        local rows = SQLWrite("UPDATE members SET nickname = ? WHERE userId = ?", nicknameValue, actualTargetId)
-        if ValidateCondition(rows ~= 1, msg, {
-                Status = "500",
-                Data = json.encode({
-                    error = "Failed to update member"
-                })
-            }) then
-            return
-        end
+        targetMember.nickname = nicknameValue
     end
+
+    members[actualTargetId] = targetMember
 
     msg.reply({
         Action = "Update-Member-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Kick-Member", function(msg)
     local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags.TargetUserId)
+    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
+    local reason = VarOrNil(msg.Tags.Reason)
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.KICK_MEMBERS)
     if ValidateCondition(not hasPermission, msg, {
@@ -1777,57 +1575,34 @@ Handlers.add("Kick-Member", function(msg)
         return
     end
 
-    -- Begin transaction
-    db:exec("BEGIN TRANSACTION")
-    local success = true
 
-    -- Remove member roles
-    local rolesDeleted = SQLWrite("DELETE FROM memberRoles WHERE userId = ?", targetUserId)
+    members[targetUserId] = nil
+    -- Decrement member counter for removed member
+    if MemberCount > 0 then MemberCount = MemberCount - 1 end
 
-    -- Remove member
-    local rows = SQLWrite("DELETE FROM members WHERE userId = ?", targetUserId)
+    -- Notify subspace that user was kicked
+    ao.send({
+        Target = Subspace,
+        Action = "User-Left-Server",
+        Tags = {
+            ["User-Id"] = targetUserId,
+            ["Server-Id"] = ao.id,
+            Reason = reason or "Kicked"
+        }
+    })
 
-    if rows ~= 1 then
-        success = false
-    end
+    msg.reply({
+        Action = "Kick-Member-Response",
+        Status = "200",
+    })
 
-    if success then
-        db:exec("COMMIT")
-
-        -- Notify subspace that user was kicked
-        ao.send({
-            Target = Subspace,
-            Action = "User-Left-Server",
-            Tags = {
-                UserId = targetUserId,
-                ServerId = ao.id,
-                Reason = "kicked"
-            }
-        })
-
-        msg.reply({
-            Action = "Kick-Member-Response",
-            Status = "200",
-            Data = json.encode({
-                rolesRemoved = rolesDeleted
-            })
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Kick-Member-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to kick member"
-            })
-        })
-    end
+    SyncProcessState()
 end)
 
 Handlers.add("Ban-Member", function(msg)
     local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags.TargetUserId)
-    local reason = VarOrNil(msg.Tags.Reason) or "No reason provided"
+    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
+    local reason = VarOrNil(msg.Tags.Reason)
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.BAN_MEMBERS)
     if ValidateCondition(not hasPermission, msg, {
@@ -1853,67 +1628,39 @@ Handlers.add("Ban-Member", function(msg)
     -- For now, just kick them since we don't have a bans table in the schema
 
     local targetMember = GetMember(targetUserId)
-    if targetMember then
-        -- Begin transaction
-        db:exec("BEGIN TRANSACTION")
-        local success = true
-
-        -- Remove member roles
-        local rolesDeleted = SQLWrite("DELETE FROM memberRoles WHERE userId = ?", targetUserId)
-
-        -- Remove member
-        local rows = SQLWrite("DELETE FROM members WHERE userId = ?", targetUserId)
-
-        if rows ~= 1 then
-            success = false
-        end
-
-        if success then
-            db:exec("COMMIT")
-
-            -- Notify subspace that user was banned
-            ao.send({
-                Target = Subspace,
-                Action = "User-Left-Server",
-                Tags = {
-                    UserId = targetUserId,
-                    ServerId = ao.id,
-                    Reason = "banned"
-                }
-            })
-
-            msg.reply({
-                Action = "Ban-Member-Response",
-                Status = "200",
-                Data = json.encode({
-                    message = "Member banned and removed from server",
-                    rolesRemoved = rolesDeleted
-                })
-            })
-        else
-            db:exec("ROLLBACK")
-            msg.reply({
-                Action = "Ban-Member-Response",
-                Status = "500",
-                Data = json.encode({
-                    error = "Failed to ban member"
-                })
-            })
-        end
-    else
-        msg.reply({
-            Action = "Ban-Member-Response",
-            Status = "200",
+    if ValidateCondition(not targetMember, msg, {
+            Status = "400",
             Data = json.encode({
-                message = "User was not a member of the server"
+                error = "Target user is not a member of this server"
             })
-        })
+        }) then
+        return
     end
+
+    members[targetUserId] = nil
+    -- Decrement member counter for removed member
+    if MemberCount > 0 then MemberCount = MemberCount - 1 end
+
+    ao.send({
+        Target = Subspace,
+        Action = "User-Left-Server",
+        Tags = {
+            ["User-Id"] = targetUserId,
+            ["Server-Id"] = ao.id,
+            Reason = reason or "Banned"
+        }
+    })
+
+    msg.reply({
+        Action = "Ban-Member-Response",
+        Status = "200",
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Unban-Member", function(msg)
     local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags.TargetUserId)
+    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.BAN_MEMBERS)
     if ValidateCondition(not hasPermission, msg, {
@@ -1924,6 +1671,8 @@ Handlers.add("Unban-Member", function(msg)
         }) then
         return
     end
+
+    SyncProcessState()
 
     -- Since we don't have a proper bans table, this is a placeholder
     -- In a full implementation, this would remove the user from a bans table
@@ -1938,10 +1687,18 @@ end)
 
 Handlers.add("Assign-Role", function(msg)
     local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags.TargetUserId)
-    local roleId = VarOrNil(msg.Tags.RoleId)
+    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
+    local roleId = VarOrNil(msg.Tags["Role-Id"])
 
-    if roleId then roleId = tonumber(roleId) end
+    if roleId then roleId = tostring(roleId) end
+    if ValidateCondition(not roleId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Role ID is required"
+            })
+        }) then
+        return
+    end
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
@@ -1963,7 +1720,7 @@ Handlers.add("Assign-Role", function(msg)
         return
     end
 
-    local role = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    local role = GetRole(roleId)
     if ValidateCondition(not role, msg, {
             Status = "400",
             Data = json.encode({
@@ -2008,9 +1765,15 @@ Handlers.add("Assign-Role", function(msg)
         return
     end
 
-    -- Check if user already has this role
-    local existingRole = SQLRead("SELECT * FROM memberRoles WHERE userId = ? AND roleId = ?", targetUserId, roleId)
-    if ValidateCondition(#existingRole > 0, msg, {
+    -- Check if user already has this role (by value)
+    local hasRole = false
+    for _, rid in ipairs(targetMember.roles or {}) do
+        if rid == roleId then
+            hasRole = true
+            break
+        end
+    end
+    if ValidateCondition(hasRole, msg, {
             Status = "400",
             Data = json.encode({
                 error = "User already has this role"
@@ -2020,26 +1783,20 @@ Handlers.add("Assign-Role", function(msg)
     end
 
     -- Assign the role
-    local rows = SQLWrite("INSERT INTO memberRoles (userId, roleId) VALUES (?, ?)", targetUserId, roleId)
-    if ValidateCondition(rows ~= 1, msg, {
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to assign role"
-            })
-        }) then
-        return
-    end
+    members[targetUserId].roles = members[targetUserId].roles or {}
+    table.insert(members[targetUserId].roles, roleId)
 
     msg.reply({
         Action = "Assign-Role-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Unassign-Role", function(msg)
     local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags.TargetUserId)
-    local roleId = VarOrNil(msg.Tags.RoleId)
+    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
+    local roleId = VarOrNil(msg.Tags["Role-Id"])
 
     if roleId then roleId = tonumber(roleId) end
 
@@ -2063,7 +1820,7 @@ Handlers.add("Unassign-Role", function(msg)
         return
     end
 
-    local role = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    local role = GetRole(roleId)
     if ValidateCondition(not role, msg, {
             Status = "400",
             Data = json.encode({
@@ -2118,9 +1875,15 @@ Handlers.add("Unassign-Role", function(msg)
         return
     end
 
-    -- Check if user has this role
-    local existingRole = SQLRead("SELECT * FROM memberRoles WHERE userId = ? AND roleId = ?", targetUserId, roleId)
-    if ValidateCondition(#existingRole == 0, msg, {
+    -- Check if user has this role (by value)
+    local hasRole = false
+    for _, rid in ipairs(targetMember.roles or {}) do
+        if rid == roleId then
+            hasRole = true
+            break
+        end
+    end
+    if ValidateCondition(not hasRole, msg, {
             Status = "400",
             Data = json.encode({
                 error = "User does not have this role"
@@ -2129,21 +1892,18 @@ Handlers.add("Unassign-Role", function(msg)
         return
     end
 
-    -- Remove the role
-    local rows = SQLWrite("DELETE FROM memberRoles WHERE userId = ? AND roleId = ?", targetUserId, roleId)
-    if ValidateCondition(rows ~= 1, msg, {
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to unassign role"
-            })
-        }) then
-        return
+    -- Remove the role (by value)
+    local newRoles = {}
+    for _, rid in ipairs(members[targetUserId].roles or {}) do
+        if rid ~= roleId then table.insert(newRoles, rid) end
     end
+    members[targetUserId].roles = newRoles
 
     msg.reply({
         Action = "Unassign-Role-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
@@ -2165,14 +1925,28 @@ end
 Handlers.add("Send-Message", function(msg)
     local userId = msg.From
     local content = VarOrNil(msg.Data)
-    local channelId = VarOrNil(msg.Tags.ChannelId)
+    local channelId = VarOrNil(msg.Tags["Channel-Id"] or msg["Channel-Id"])
     local attachments = VarOrNil(msg.Tags.Attachments) or "[]"
-    local replyTo = VarOrNil(msg.Tags.ReplyTo)
+    local replyTo = VarOrNil(msg.Tags["Reply-To"])
     local timestamp = tonumber(msg.Timestamp or os.time())
     local messageTxId = msg.Id
 
-    if channelId then channelId = tonumber(channelId) end
-    if replyTo then replyTo = tonumber(replyTo) end
+    print(msg)
+    debug_msg = msg
+
+    debug_chn_id = channelId
+    if channelId then channelId = tostring(channelId) end
+    debug_chn_id_parsed = channelId
+
+    if ValidateCondition(not channelId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Channel ID is required"
+            })
+        }) then
+        return
+    end
+    if replyTo then replyTo = tostring(replyTo) end
 
     local member = GetMember(userId)
     if ValidateCondition(not member, msg, {
@@ -2184,7 +1958,8 @@ Handlers.add("Send-Message", function(msg)
         return
     end
 
-    local channel = SQLRead("SELECT * FROM channels WHERE channelId = ?", channelId)[1]
+    local channel = GetChannel(channelId)
+    print(channel)
     if ValidateCondition(not channel, msg, {
             Status = "400",
             Data = json.encode({
@@ -2205,8 +1980,10 @@ Handlers.add("Send-Message", function(msg)
     end
 
     -- Check if reply message exists (if replying)
+    local channelKey = tostring(channelId)
     if replyTo then
-        local replyMessage = SQLRead("SELECT * FROM messages WHERE messageId = ?", replyTo)[1]
+        local replyBucket = messages[channelKey] or {}
+        local replyMessage = replyBucket[replyTo]
         if ValidateCondition(not replyMessage, msg, {
                 Status = "400",
                 Data = json.encode({
@@ -2217,20 +1994,17 @@ Handlers.add("Send-Message", function(msg)
         end
     end
 
+    -- Ensure channel message bucket exists
+    messages[channelKey] = messages[channelKey] or {}
     -- Insert message
-    local rows = SQLWrite([[
-        INSERT INTO messages (content, channelId, authorId, timestamp, messageTxId, attachments, replyTo)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ]], content, channelId, userId, timestamp, messageTxId, attachments, replyTo)
-
-    if ValidateCondition(rows ~= 1, msg, {
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to send message"
-            })
-        }) then
-        return
-    end
+    messages[channelKey][messageTxId] = {
+        content = content,
+        authorId = userId,
+        timestamp = timestamp,
+        messageId = messageTxId,
+        attachments = attachments,
+        replyTo = replyTo
+    }
 
     -- Extract mentions from content and send notification messages
     local mentions = ExtractMentions(content)
@@ -2242,16 +2016,16 @@ Handlers.add("Send-Message", function(msg)
                 Target = Subspace,
                 Action = "Add-Notification",
                 Tags = {
-                    ServerOrDmId = ao.id,
-                    FromUserId = userId,
-                    ForUserId = mentionedUserId,
+                    ["Server-Or-Dm-Id"] = ao.id,
+                    ["From-User-Id"] = userId,
+                    ["For-User-Id"] = mentionedUserId,
                     Source = "SERVER",
-                    ChannelId = tostring(channelId),
-                    ServerName = Name,
-                    ServerLogo = Logo,
-                    ChannelName = channel.name,
-                    AuthorName = member.nickname,
-                    MessageTxId = messageTxId,
+                    ["Channel-Id"] = tostring(channelId),
+                    ["Server-Name"] = Name,
+                    ["Server-Logo"] = Logo,
+                    ["Channel-Name"] = channel.name,
+                    ["Author-Name"] = member.nickname,
+                    ["Message-Tx-Id"] = messageTxId,
                     Timestamp = tostring(timestamp),
                 }
             })
@@ -2262,14 +2036,14 @@ Handlers.add("Send-Message", function(msg)
         Action = "Send-Message-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Edit-Message", function(msg)
     local userId = msg.From
-    local messageId = VarOrNil(msg.Tags.MessageId)
+    local messageId = VarOrNil(msg.Tags["Message-Id"])
+    local channelId = VarOrNil(msg.Tags["Channel-Id"])
     local content = VarOrNil(msg.Data)
-
-    if messageId then messageId = tonumber(messageId) end
 
     local member = GetMember(userId)
     if ValidateCondition(not member, msg, {
@@ -2281,7 +2055,18 @@ Handlers.add("Edit-Message", function(msg)
         return
     end
 
-    local message = SQLRead("SELECT * FROM messages WHERE messageId = ?", messageId)[1]
+    if ValidateCondition(not channelId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Message not found"
+            })
+        }) then
+        return
+    end
+
+    if channelId then channelId = tostring(channelId) end
+    local messageBucket = messages[channelId] or {}
+    local message = messageBucket[messageId]
     if ValidateCondition(not message, msg, {
             Status = "400",
             Data = json.encode({
@@ -2314,32 +2099,20 @@ Handlers.add("Edit-Message", function(msg)
     end
 
     -- Update message
-    local rows = SQLWrite([[
-        UPDATE messages
-        SET content = ?, edited = 1
-        WHERE messageId = ?
-    ]], content, messageId)
-
-    if ValidateCondition(rows ~= 1, msg, {
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to edit message"
-            })
-        }) then
-        return
-    end
+    message.content = content
+    message.edited = 1
 
     msg.reply({
         Action = "Edit-Message-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Delete-Message", function(msg)
     local userId = msg.From
-    local messageId = VarOrNil(msg.Tags.MessageId)
-
-    if messageId then messageId = tonumber(messageId) end
+    local messageId = VarOrNil(msg.Tags["Message-Id"])
+    local channelId = VarOrNil(msg.Tags["Channel-Id"])
 
     local member = GetMember(userId)
     if ValidateCondition(not member, msg, {
@@ -2351,7 +2124,18 @@ Handlers.add("Delete-Message", function(msg)
         return
     end
 
-    local message = SQLRead("SELECT * FROM messages WHERE messageId = ?", messageId)[1]
+    if ValidateCondition(not channelId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Message not found"
+            })
+        }) then
+        return
+    end
+
+    if channelId then channelId = tostring(channelId) end
+    local messageBucket = messages[channelId] or {}
+    local message = messageBucket[messageId]
     if ValidateCondition(not message, msg, {
             Status = "400",
             Data = json.encode({
@@ -2376,165 +2160,29 @@ Handlers.add("Delete-Message", function(msg)
     end
 
     -- Delete message
-    local rows = SQLWrite("DELETE FROM messages WHERE messageId = ?", messageId)
-
-    if ValidateCondition(rows ~= 1, msg, {
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to delete message"
-            })
-        }) then
-        return
+    if channelId then channelId = tostring(channelId) end
+    if messages[channelId] then
+        messages[channelId][messageId] = nil
     end
 
     msg.reply({
         Action = "Delete-Message-Response",
         Status = "200",
     })
-end)
-
-Handlers.add("Get-Messages", function(msg)
-    local userId = msg.From
-    local channelId = VarOrNil(msg.Tags.ChannelId)
-    local limit = VarOrNil(msg.Tags.Limit) or 50
-    local before = VarOrNil(msg.Tags.Before)
-    local after = VarOrNil(msg.Tags.After)
-
-    if channelId then channelId = tonumber(channelId) end
-    if limit then limit = tonumber(limit) end
-    if before then before = tonumber(before) end
-    if after then after = tonumber(after) end
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "You are not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    local messages
-
-    if channelId then
-        -- Get messages from specific channel
-        -- Check if channel exists
-        local channel = SQLRead("SELECT * FROM channels WHERE channelId = ?", channelId)[1]
-        if ValidateCondition(not channel, msg, {
-                Status = "400",
-                Data = json.encode({
-                    error = "Channel not found"
-                })
-            }) then
-            return
-        end
-
-        -- Build query with optional pagination for specific channel
-        local query = "SELECT * FROM messages WHERE channelId = ?"
-        local params = { channelId }
-
-        if before then
-            query = query .. " AND messageId < ?"
-            table.insert(params, before)
-        end
-
-        if after then
-            query = query .. " AND messageId > ?"
-            table.insert(params, after)
-        end
-
-        query = query .. " ORDER BY messageId DESC LIMIT ?"
-        table.insert(params, limit)
-
-        messages = SQLRead(query, table.unpack(params))
-    else
-        -- Get messages from all channels in the server
-        local query = "SELECT * FROM messages"
-        local params = {}
-
-        if before then
-            query = query .. " WHERE messageId < ?"
-            table.insert(params, before)
-        end
-
-        if after then
-            if before then
-                query = query .. " AND messageId > ?"
-            else
-                query = query .. " WHERE messageId > ?"
-            end
-            table.insert(params, after)
-        end
-
-        query = query .. " ORDER BY messageId DESC LIMIT ?"
-        table.insert(params, limit)
-
-        messages = SQLRead(query, table.unpack(params))
-    end
-
-    msg.reply({
-        Action = "Get-Messages-Response",
-        Status = "200",
-        Data = json.encode({
-            messages = messages,
-            channelScope = channelId and "single" or "all"
-        })
-    })
-end)
-
-Handlers.add("Get-Single-Message", function(msg)
-    local messageId = VarOrNil(msg.Tags.MessageId)
-    local messageTxId = VarOrNil(msg.Tags.MessageTxId)
-
-    if messageId then messageId = tonumber(messageId) end
-
-    local message
-    if messageId then
-        message = SQLRead("SELECT * FROM messages WHERE messageId = ?", messageId)[1]
-    elseif messageTxId then
-        message = SQLRead("SELECT * FROM messages WHERE messageTxId = ?", messageTxId)[1]
-    else
-        msg.reply({
-            Action = "Get-Single-Message-Response",
-            Status = "400",
-            Data = json.encode({
-                error = "Either messageId or messageTxId is required"
-            })
-        })
-        return
-    end
-
-    if ValidateCondition(not message, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Message not found"
-            })
-        }) then
-        return
-    end
-
-    msg.reply({
-        Action = "Get-Single-Message-Response",
-        Status = "200",
-        Data = json.encode({
-            message = message
-        })
-    })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
 
 -- Validate and fix any invalid permissions in existing roles
 function ValidateExistingRolePermissions()
-    local roles = SQLRead("SELECT * FROM roles")
     local fixedCount = 0
 
-    for _, role in ipairs(roles) do
+    for _, role in pairs(roles) do
         if not PermissionIsValid(role.permissions) then
             -- Fix invalid permissions by setting to basic SEND_MESSAGES permission
             local newPermissions = Permissions.SEND_MESSAGES
-            SQLWrite("UPDATE roles SET permissions = ? WHERE roleId = ?", newPermissions, role.roleId)
+            role.permissions = newPermissions
             fixedCount = fixedCount + 1
             print("Fixed invalid permissions for role: " .. role.name .. " (ID: " .. role.roleId .. ")")
         end
@@ -2551,6 +2199,14 @@ ValidateExistingRolePermissions()
 -- Ensure all existing members have the default role
 EnsureAllMembersHaveDefaultRole()
 
+-- Initialize MemberCount once at startup based on current state
+local function InitializeMemberCount()
+    local count = 0
+    for _ in pairs(members) do count = count + 1 end
+    MemberCount = count
+end
+InitializeMemberCount()
+
 ----------------------------------------------------------------------------
 
 -- Get the user's highest role (lowest orderId = highest hierarchy)
@@ -2563,11 +2219,10 @@ function GetUserHighestRole(userId)
     local highestRole = nil
     local lowestOrderId = nil
 
-    for _, roleId in ipairs(member.roles) do
-        local role = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    for _, role in ipairs(member.roles) do
         if role then
-            if lowestOrderId == nil or role.orderId < lowestOrderId then
-                lowestOrderId = role.orderId
+            if lowestOrderId == nil or (role.orderId or math.huge) < lowestOrderId then
+                lowestOrderId = role.orderId or math.huge
                 highestRole = role
             end
         end
@@ -2584,7 +2239,7 @@ function CanUserManageRole(userId, targetRoleId)
     end
 
     -- check if role exists
-    local targetRole = SQLRead("SELECT * FROM roles WHERE roleId = ?", targetRoleId)[1]
+    local targetRole = roles[targetRoleId]
     if not targetRole then
         return false
     end
@@ -2619,11 +2274,10 @@ function GetUserHighestManageRolesRole(userId)
     local highestManageRole = nil
     local lowestOrderId = nil
 
-    for _, roleId in ipairs(member.roles) do
-        local role = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    for _, role in ipairs(member.roles) do
         if role and HasSpecificPermission(role.permissions, Permissions.MANAGE_ROLES) then
-            if lowestOrderId == nil or role.orderId < lowestOrderId then
-                lowestOrderId = role.orderId
+            if lowestOrderId == nil or (role.orderId or math.huge) < lowestOrderId then
+                lowestOrderId = role.orderId or math.huge
                 highestManageRole = role
             end
         end
@@ -2645,7 +2299,7 @@ function CanUserManageOwnRole(userId, roleId)
     end
 
     -- Get the target role
-    local targetRole = SQLRead("SELECT * FROM roles WHERE roleId = ?", roleId)[1]
+    local targetRole = roles[roleId]
     if not targetRole then
         return false
     end
@@ -2755,8 +2409,8 @@ Handlers.add("Add-Bot", function(msg)
     end
 
     -- check if bot already exists
-    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ? AND botApproved = 0", botProcess)[1]
-    if ValidateCondition(bot, msg, {
+    local bot = bots[botProcess]
+    if ValidateCondition(bot and bot.approved, msg, {
             Status = "400",
             Data = json.encode({
                 error = "Bot already exists in server"
@@ -2766,20 +2420,16 @@ Handlers.add("Add-Bot", function(msg)
     end
 
     -- add bot to server
-    local rows = SQLWrite("INSERT INTO bots (botProcess) VALUES (?)", botProcess)
-    if ValidateCondition(rows ~= 1, msg, {
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to add bot"
-            })
-        }) then
-        return
-    end
+    bots[botProcess] = {
+        approved = false,
+        process = botProcess
+    }
 
     msg.reply({
         Action = "Add-Bot-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Approve-Add-Bot", function(msg)
@@ -2787,7 +2437,7 @@ Handlers.add("Approve-Add-Bot", function(msg)
 
     local botProcess = VarOrNil(msg.Tags.BotProcess)
 
-    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    local bot = bots[botProcess]
     if ValidateCondition(not bot, msg, {
             Status = "400",
             Data = json.encode({
@@ -2797,20 +2447,22 @@ Handlers.add("Approve-Add-Bot", function(msg)
         return
     end
 
-    SQLWrite("UPDATE bots SET botApproved = 1 WHERE botProcess = ?", botProcess)
+    bot.approved = true
+    bots[botProcess] = bot
 
     msg.reply({
         Action = "Approve-Add-Bot-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Subscribe", function(msg)
     local botProcess = msg.From
 
     -- verify if bot is approved
-    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ? AND botApproved = 1", botProcess)[1]
-    if ValidateCondition(not bot, msg, {
+    local bot = bots[botProcess]
+    if ValidateCondition(not bot or not bot.approved, msg, {
             Status = "400",
             Data = json.encode({
                 error = "Bot is either not approved or doesnot exist in the server"
@@ -2826,6 +2478,7 @@ Handlers.add("Subscribe", function(msg)
         Action = "Subscribe-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Remove-Bot", function(msg)
@@ -2853,7 +2506,7 @@ Handlers.add("Remove-Bot", function(msg)
         return
     end
 
-    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    local bot = bots[botProcess]
     if ValidateCondition(not bot, msg, {
             Status = "400",
             Data = json.encode({
@@ -2864,15 +2517,8 @@ Handlers.add("Remove-Bot", function(msg)
     end
 
     -- remove bot from server
-    local rows = SQLWrite("DELETE FROM bots WHERE botProcess = ?", botProcess)
-    if ValidateCondition(rows ~= 1, msg, {
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to remove bot"
-            })
-        }) then
-        return
-    end
+    bots[botProcess] = nil
+    SubscribedBots[botProcess] = nil
 
     -- tell subspace and bot process that bot has been removed
     ao.send({
@@ -2891,4 +2537,5 @@ Handlers.add("Remove-Bot", function(msg)
         Action = "Remove-Bot-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)

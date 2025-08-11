@@ -12,8 +12,8 @@ export interface Server {
     version?: string;
     memberCount: number;
     members?: Member[];
-    channels: Channel[];
-    categories: Category[];
+    channels: Record<string, Channel>;
+    categories: Record<string, Category>;
     // roles: Role[];
     roles: Record<string, Role>; // roleId -> role
     createdAt?: number;
@@ -37,7 +37,7 @@ export interface Channel {
     allowMessaging?: 0 | 1;
     allowAttachments?: 0 | 1;
     description?: string;
-    type?: 'text' | 'voice';
+    type?: 'text';
 }
 
 export interface Category {
@@ -140,7 +140,7 @@ export class ServerManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.CreateServer },
-                    { name: "ServerProcess", value: serverId }
+                    { name: "Server-Process", value: serverId }
                 ]
             });
 
@@ -153,41 +153,72 @@ export class ServerManager {
                 throw new Error(msg.Data);
             }
 
-            return msg.Tags.ServerId;
+            return msg.Tags["Server-Id"];
         });
     }
 
     async getServer(serverId: string): Promise<Server | null> {
         return loggedAction('🔍 getting server', { serverId }, async () => {
-            const res = await this.connectionManager.dryrun({
-                processId: serverId,
-                tags: [
-                    { name: "Action", value: Constants.Actions.Info }
-                ]
-            });
+            // Prefer reading patched state from forward.computer cache
+            let info: any | null = null;
+            try {
+                info = await ConnectionManager.hashpathGET<any>(`${serverId}~process@1.0/now/cache/server/serverinfo/~json@1.0/serialize`)
+            } catch (_) {
+                info = null;
+            }
+            if (info) {
+                const rolesMap: Record<string, Role> = (Array.isArray(info.roles) ? info.roles : Object.values(info.roles || {})).reduce(
+                    (acc: Record<string, Role>, role: any) => {
+                        if (role && role.roleId != null) acc[String(role.roleId)] = role as Role;
+                        return acc;
+                    },
+                    {}
+                );
 
-            const data = this.connectionManager.parseOutput(res, {
-                hasMatchingTag: "Action",
-                hasMatchingTagValue: "Info-Response"
-            });
+                // Normalize channels into a key-value map
+                const channelsMap: Record<string, Channel> = {};
+                if (info.channels) {
+                    const entries = Array.isArray(info.channels)
+                        ? (info.channels as any[]).map((c, idx) => [String(c?.channelId ?? idx + 1), c])
+                        : Object.entries(info.channels as Record<string, any>);
+                    for (const [key, raw] of entries) {
+                        if (!raw) continue;
+                        const id = String(raw.channelId ?? key);
+                        channelsMap[id] = { ...raw, channelId: id } as Channel;
+                    }
+                }
 
-            const server: Server = {
-                serverId,
-                ownerId: data.Tags.Owner_,
-                name: data.Tags.Name,
-                logo: data.Tags.Logo,
-                description: data.Tags.Description,
-                version: data.Tags.Version,
-                memberCount: parseInt(data.Tags.MemberCount) || 0,
-                channels: JSON.parse(data.Tags.Channels),
-                categories: JSON.parse(data.Tags.Categories),
-                roles: JSON.parse(data.Tags.Roles).reduce((acc: Record<string, Role>, role: Role) => {
-                    acc[role.roleId.toString()] = role;
-                    return acc;
-                }, {})
+                // Normalize categories into a key-value map
+                const categoriesMap: Record<string, Category> = {};
+                if (info.categories) {
+                    const entries = Array.isArray(info.categories)
+                        ? (info.categories as any[]).map((c, idx) => [String(c?.categoryId ?? idx + 1), c])
+                        : Object.entries(info.categories as Record<string, any>);
+                    for (const [key, raw] of entries) {
+                        if (!raw) continue;
+                        const id = String(raw.categoryId ?? key);
+                        categoriesMap[id] = { ...raw, categoryId: id } as Category;
+                    }
+                }
+
+                const server: Server = {
+                    serverId,
+                    ownerId: info.owner,
+                    name: info.name,
+                    logo: info.logo,
+                    description: info.description,
+                    version: info.version,
+                    memberCount: Number(info.memberCount) || 0,
+                    channels: channelsMap,
+                    categories: categoriesMap,
+                    roles: rolesMap,
+                    createdAt: undefined
+                };
+                return server;
             }
 
-            return server;
+            // No legacy fallback; if cache is unavailable, return null
+            return null;
         });
     }
 
@@ -255,32 +286,73 @@ export class ServerManager {
         });
     }
 
+    // single member
     async getMember(serverId: string, userId: string): Promise<Member | null> {
         return loggedAction('🔍 getting member', { serverId, userId }, async () => {
-            const res = await this.connectionManager.dryrun({
-                processId: serverId,
-                tags: [
-                    { name: "Action", value: Constants.Actions.GetMember },
-                    { name: "UserId", value: userId }
-                ]
-            });
-
-            const data = JSON.parse(this.connectionManager.parseOutput(res).Tags.Member);
-            return data ? data as Member : null;
+            let member: Record<string, any> | null = null;
+            try {
+                member = await ConnectionManager.hashpathGET<Record<string, any>>(`${serverId}~process@1.0/now/cache/server/members/${userId}/~json@1.0/serialize`)
+            } catch (_) {
+                member = null;
+            }
+            console.log(member)
+            // Endpoint may return either an object keyed by userId or the member object directly
+            const raw = (member && (member as any)[userId]) ? (member as any)[userId] : (member as any);
+            if (!raw) return null;
+            return {
+                userId: raw.userId || userId,
+                serverId,
+                nickname: raw.nickname,
+                roles: Array.isArray(raw.roles)
+                    ? raw.roles.map((r: any) =>
+                        typeof r === 'object' && r !== null ? String(r.roleId ?? r.id ?? r) : String(r)
+                    )
+                    : Array.isArray(raw.rolesDetailed)
+                        ? raw.rolesDetailed.map((r: any) =>
+                            typeof r === 'object' && r !== null ? String(r.roleId ?? r.id ?? r) : String(r)
+                        )
+                        : [],
+                joinedAt: raw.joinedAt,
+                permissions: raw.permissions
+            };
         });
     }
 
+    // all members
     async getAllMembers(serverId: string): Promise<Record<string, Member>> {
         return loggedAction('🔍 getting all members', { serverId }, async () => {
-            const res = await this.connectionManager.dryrun({
-                processId: serverId,
-                tags: [
-                    { name: "Action", value: Constants.Actions.GetAllMembers }
-                ]
-            });
+            let members: Record<string, any> | null = null;
+            try {
+                members = await ConnectionManager.hashpathGET<Record<string, any>>(`${serverId}~process@1.0/now/cache/server/members/~json@1.0/serialize`)
+            } catch (_) {
+                members = null;
+            }
+            const result: Record<string, Member> = {};
+            if (members) {
+                Object.entries(members).forEach(([uid, raw]) => {
+                    if (!raw) return;
+                    result[uid] = {
+                        userId: raw.userId || uid,
+                        serverId,
+                        nickname: raw.nickname,
+                        roles: Array.isArray(raw.roles)
+                            ? raw.roles.map((r: any) =>
+                                typeof r === 'object' && r !== null ? String(r.roleId ?? r.id ?? r) : String(r)
+                            )
+                            : Array.isArray(raw.rolesDetailed)
+                                ? raw.rolesDetailed.map((r: any) =>
+                                    typeof r === 'object' && r !== null ? String(r.roleId ?? r.id ?? r) : String(r)
+                                )
+                                : [],
+                        joinedAt: raw.joinedAt,
+                        permissions: raw.permissions
+                    } as Member;
+                });
+                return result;
+            }
 
-            const msg = this.connectionManager.parseOutput(res);
-            return JSON.parse(msg.Data);
+            // No legacy fallback
+            return {};
         });
     }
 
@@ -288,7 +360,7 @@ export class ServerManager {
         return loggedAction('✏️ updating member', { serverId, userId: params.userId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateMember },
-                { name: "TargetUserId", value: params.userId }
+                { name: "Target-User-Id", value: params.userId }
             ];
 
             if (params.nickname !== undefined) {
@@ -342,7 +414,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.KickMember },
-                    { name: "TargetUserId", value: userId }
+                    { name: "Target-User-Id", value: userId }
                 ]
             });
 
@@ -357,7 +429,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.BanMember },
-                    { name: "TargetUserId", value: userId }
+                    { name: "Target-User-Id", value: userId }
                 ]
             });
 
@@ -372,7 +444,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.UnbanMember },
-                    { name: "TargetUserId", value: userId }
+                    { name: "Target-User-Id", value: userId }
                 ]
             });
 
@@ -389,7 +461,7 @@ export class ServerManager {
             ];
 
             if (params.orderId !== undefined) {
-                tags.push({ name: "OrderId", value: params.orderId.toString() });
+                tags.push({ name: "Order-Id", value: params.orderId.toString() });
             }
 
             const res = await this.connectionManager.sendMessage({
@@ -406,12 +478,12 @@ export class ServerManager {
         return loggedAction('✏️ updating category', { serverId, categoryId: params.categoryId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateCategory },
-                { name: "CategoryId", value: params.categoryId }
+                { name: "Category-Id", value: params.categoryId }
             ];
 
             if (params.name) tags.push({ name: "Name", value: params.name });
             if (params.orderId !== undefined) {
-                tags.push({ name: "OrderId", value: params.orderId.toString() });
+                tags.push({ name: "Order-Id", value: params.orderId.toString() });
             }
 
             const res = await this.connectionManager.sendMessage({
@@ -430,7 +502,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteCategory },
-                    { name: "CategoryId", value: categoryId }
+                    { name: "Category-Id", value: categoryId }
                 ]
             });
 
@@ -446,8 +518,8 @@ export class ServerManager {
                 { name: "Name", value: params.name }
             ];
 
-            if (params.categoryId) tags.push({ name: "CategoryId", value: params.categoryId });
-            if (params.orderId !== undefined) tags.push({ name: "OrderId", value: params.orderId.toString() });
+            if (params.categoryId) tags.push({ name: "Category-Id", value: params.categoryId });
+            if (params.orderId !== undefined) tags.push({ name: "Order-Id", value: params.orderId.toString() });
             // if (params.type) tags.push({ name: "Type", value: params.type }); // Commented out - server doesn't handle this yet
 
             const res = await this.connectionManager.sendMessage({
@@ -464,7 +536,7 @@ export class ServerManager {
         return loggedAction('✏️ updating channel', { serverId, channelId: params.channelId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateChannel },
-                { name: "ChannelId", value: params.channelId }
+                { name: "Channel-Id", value: params.channelId }
             ];
 
             // console.log('🔧 SDK DEBUG: Processing params', {
@@ -485,13 +557,13 @@ export class ServerManager {
                 //     categoryValue,
                 //     categoryValueType: typeof categoryValue
                 // });
-                tags.push({ name: "CategoryId", value: categoryValue });
+                tags.push({ name: "Category-Id", value: categoryValue });
             } else {
                 // console.log('🔧 SDK DEBUG: CategoryId is undefined, skipping tag');
             }
-            if (params.orderId !== undefined) tags.push({ name: "OrderId", value: params.orderId.toString() });
-            if (params.allowMessaging !== undefined) tags.push({ name: "AllowMessaging", value: params.allowMessaging.toString() });
-            if (params.allowAttachments !== undefined) tags.push({ name: "AllowAttachments", value: params.allowAttachments.toString() });
+            if (params.orderId !== undefined) tags.push({ name: "Order-Id", value: params.orderId.toString() });
+            if (params.allowMessaging !== undefined) tags.push({ name: "Allow-Messaging", value: params.allowMessaging.toString() });
+            if (params.allowAttachments !== undefined) tags.push({ name: "Allow-Attachments", value: params.allowAttachments.toString() });
 
             // console.log('📤 SDK: Sending tags to server:', tags);
 
@@ -512,7 +584,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteChannel },
-                    { name: "ChannelId", value: channelId }
+                    { name: "Channel-Id", value: channelId }
                 ]
             });
 
@@ -546,19 +618,16 @@ export class ServerManager {
         return loggedAction('✏️ updating role', { serverId, roleId: params.roleId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateRole },
-                { name: "RoleId", value: params.roleId.toString() }
+                { name: "Role-Id", value: params.roleId.toString() }
             ];
 
             if (params.name) tags.push({ name: "Name", value: params.name });
             if (params.color) tags.push({ name: "Color", value: params.color });
             if (params.permissions) tags.push({ name: "Permissions", value: params.permissions.toString() });
 
-            // Fix: Use orderId (what server expects) instead of position
-            // Support both for backward compatibility
+            // Only support OrderId; no legacy position mapping
             if (params.orderId !== undefined) {
-                tags.push({ name: "OrderId", value: params.orderId.toString() });
-            } else if (params.position !== undefined) {
-                tags.push({ name: "OrderId", value: params.position.toString() });
+                tags.push({ name: "Order-Id", value: params.orderId.toString() });
             }
 
             const res = await this.connectionManager.sendMessage({
@@ -581,8 +650,8 @@ export class ServerManager {
         return loggedAction('🔄 reordering role', { serverId, roleId, newOrderId }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.UpdateRole },
-                { name: "RoleId", value: roleId.toString() },
-                { name: "OrderId", value: newOrderId.toString() }
+                { name: "Role-Id", value: roleId.toString() },
+                { name: "Order-Id", value: newOrderId.toString() }
             ];
 
             const res = await this.connectionManager.sendMessage({
@@ -652,7 +721,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteRole },
-                    { name: "RoleId", value: roleId.toString() }
+                    { name: "Role-Id", value: roleId.toString() }
                 ]
             });
 
@@ -667,8 +736,8 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.AssignRole },
-                    { name: "TargetUserId", value: params.userId },
-                    { name: "RoleId", value: params.roleId.toString() }
+                    { name: "Target-User-Id", value: params.userId },
+                    { name: "Role-Id", value: params.roleId.toString() }
                 ]
             });
 
@@ -683,8 +752,8 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.UnassignRole },
-                    { name: "TargetUserId", value: params.userId },
-                    { name: "RoleId", value: params.roleId.toString() }
+                    { name: "Target-User-Id", value: params.userId },
+                    { name: "Role-Id", value: params.roleId.toString() }
                 ]
             });
 
@@ -697,11 +766,19 @@ export class ServerManager {
         return loggedAction('📤 sending message', { serverId, channelId: params.channelId, content: params.content.substring(0, 100) + (params.content.length > 100 ? '...' : '') }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.SendMessage },
-                { name: "ChannelId", value: params.channelId },
+                { name: "Channel-Id", value: params.channelId },
             ];
 
             if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
-            if (params.replyTo) tags.push({ name: "ReplyTo", value: `${params.replyTo}` });
+            if (params.replyTo) tags.push({ name: "Reply-To", value: `${params.replyTo}` });
+
+            console.log("🔧 SDK DEBUG: Sending message", {
+                serverId,
+                channelId: params.channelId,
+                content: params.content,
+                attachments: params.attachments,
+                replyTo: params.replyTo
+            })
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
@@ -710,6 +787,7 @@ export class ServerManager {
             });
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Send-Message-Response" });
+            console.log("🔧 SDK DEBUG: Send-Message-Response", data)
             return data?.Tags?.Status === "200";
         });
     }
@@ -720,7 +798,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.EditMessage },
-                    { name: "MessageId", value: params.messageId },
+                    { name: "Message-Id", value: params.messageId },
                     // { name: "Content", value: params.content }
                 ],
                 data: params.content
@@ -737,7 +815,7 @@ export class ServerManager {
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteMessage },
-                    { name: "MessageId", value: messageId }
+                    { name: "Message-Id", value: messageId }
                 ]
             });
 
@@ -748,37 +826,92 @@ export class ServerManager {
 
     async getMessage(serverId: string, messageId: string): Promise<Message | null> {
         return loggedAction('🔍 getting message', { serverId, messageId }, async () => {
-            const res = await this.connectionManager.dryrun({
-                processId: serverId,
-                tags: [
-                    { name: "Action", value: Constants.Actions.GetSingleMessage },
-                    { name: "MessageId", value: String(messageId) }
-                ]
-            });
-
-            const data = JSON.parse(this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Get-Single-Message-Response" }).Data);
-            return data ? data as Message : null;
+            let all: Record<string, Record<string, any>> | null = null;
+            try {
+                const url = `https://forward.computer/${serverId}~process@1.0/now/cache/server/messages/~json@1.0/serialize`;
+                const res = await fetch(url);
+                if (res.ok) {
+                    all = (await res.json()) as Record<string, Record<string, any>>;
+                }
+            } catch (_) {
+                all = null;
+            }
+            if (!all) return null;
+            for (const [channelId, bucket] of Object.entries(all)) {
+                const msg: any = (bucket as any)?.[messageId];
+                if (msg) {
+                    const mapped: Message = {
+                        messageId: String(msg.messageId || messageId),
+                        serverId,
+                        channelId: String(channelId),
+                        senderId: String(msg.authorId),
+                        content: String(msg.content || ''),
+                        timestamp: Number(msg.timestamp) || 0,
+                        attachments: msg.attachments,
+                        replyTo: msg.replyTo ? String(msg.replyTo) : undefined,
+                        edited: msg.edited === 1 || msg.edited === true,
+                        editedAt: msg.editedAt ? Number(msg.editedAt) : undefined
+                    };
+                    return mapped;
+                }
+            }
+            return null;
         });
     }
 
     async getMessages(serverId: string, params: { channelId: string; limit?: number; before?: string; after?: string }): Promise<MessagesResponse | null> {
         return loggedAction('🔍 getting messages', { serverId, channelId: params.channelId, limit: params.limit }, async () => {
-            const tags: Tag[] = [
-                { name: "Action", value: Constants.Actions.GetMessages },
-                { name: "ChannelId", value: params.channelId }
-            ];
+            let all: Record<string, Record<string, any>> | null = null;
+            try {
+                const url = `https://forward.computer/${serverId}~process@1.0/now/cache/server/messages/~json@1.0/serialize`;
+                const res = await fetch(url);
+                if (res.ok) {
+                    all = (await res.json()) as Record<string, Record<string, any>>;
+                }
+            } catch (_) {
+                all = null;
+            }
+            const bucket = all?.[String(params.channelId)];
+            if (!bucket) return { messages: [], hasMore: false };
 
-            if (params.limit) tags.push({ name: "Limit", value: params.limit.toString() });
-            if (params.before) tags.push({ name: "Before", value: params.before });
-            if (params.after) tags.push({ name: "After", value: params.after });
+            const allMessages: any[] = Object.values(bucket);
+            // Sort by timestamp ascending
+            allMessages.sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
 
-            const res = await this.connectionManager.dryrun({
-                processId: serverId,
-                tags
-            });
+            let filtered = allMessages;
+            // Apply before/after based on reference messageId timestamps if provided
+            const findTs = (id?: string) => {
+                if (!id) return undefined;
+                const m = (bucket as any)[id];
+                return m ? Number(m.timestamp) || 0 : undefined;
+            };
+            const beforeTs = findTs(params.before);
+            const afterTs = findTs(params.after);
+            if (beforeTs !== undefined) {
+                filtered = filtered.filter(m => Number(m.timestamp) < beforeTs);
+            }
+            if (afterTs !== undefined) {
+                filtered = filtered.filter(m => Number(m.timestamp) > afterTs);
+            }
 
-            const data = JSON.parse(this.connectionManager.parseOutput(res).Data);
-            return data ? data as MessagesResponse : null;
+            const limit = params.limit ?? filtered.length;
+            const sliced = filtered.slice(-limit); // return most recent up to limit
+            const hasMore = filtered.length > sliced.length;
+
+            const mapped: Message[] = sliced.map((msg: any) => ({
+                messageId: String(msg.messageId),
+                serverId,
+                channelId: String(params.channelId),
+                senderId: String(msg.authorId),
+                content: String(msg.content || ''),
+                timestamp: Number(msg.timestamp) || 0,
+                attachments: msg.attachments,
+                replyTo: msg.replyTo ? String(msg.replyTo) : undefined,
+                edited: msg.edited === 1 || msg.edited === true,
+                editedAt: msg.editedAt ? Number(msg.editedAt) : undefined
+            }));
+
+            return { messages: mapped, hasMore };
         });
     }
 } 

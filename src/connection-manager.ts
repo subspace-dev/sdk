@@ -39,6 +39,7 @@ export class ConnectionManager {
     cuUrl: string
     gatewayUrl: string
     sources: Sources
+    static hyperbeamUrl: string = "https://forward.computer"
 
     constructor(config: ConnectionConfig = {}) {
         this.cuUrl = config.CU_URL || Constants.CuEndpoints[0] || 'https://cu.arnode.asia'
@@ -54,6 +55,53 @@ export class ConnectionManager {
         })
 
         this.refreshSources()
+    }
+
+    static async hashpathGET<T>(path: string): Promise<T> {
+        const maxRetries = 3
+        let retries = 0
+        while (retries < maxRetries) {
+            try {
+                const res = await fetch(`${ConnectionManager.hyperbeamUrl}/${path}`)
+                return ConnectionManager.sanitizeHyperbeamResult(await res.json()) as T
+            } catch (e) {
+                retries++
+                await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)))
+            }
+        }
+    }
+
+    static sanitizeHyperbeamResult(input: Record<string, any>): any {
+        const blockedKeys = new Set<string>([
+            'accept',
+            'accept-bundle',
+            'accept-encoding',
+            'accept-language',
+            'connection',
+            'device',
+            'host',
+            'method',
+            'priority',
+            'sec-ch-ua',
+            'sec-ch-ua-mobile',
+            'sec-ch-ua-platform',
+            'sec-fetch-dest',
+            'sec-fetch-mode',
+            'sec-fetch-site',
+            'sec-fetch-user',
+            'sec-gpc',
+            'upgrade-insecure-requests',
+            'user-agent',
+            'x-forwarded-for',
+            'x-forwarded-proto',
+            'x-real-ip',
+            'origin',
+            'referer'
+        ])
+
+        return Object.fromEntries(
+            Object.entries(input).filter(([key]) => !blockedKeys.has(key))
+        );
     }
 
     updateConfig(config: Partial<ConnectionConfig>) {
@@ -73,30 +121,29 @@ export class ConnectionManager {
 
     public async refreshSources() {
         // fetch sources from Subspace process
-        const res = await this.dryrun({
-            processId: Constants.Subspace,
-            tags: [
-                { name: "Action", value: "Sources" }
-            ]
-        })
-        if (res.Error) {
-            throw new Error(`AO Error: ${res.Error}`)
-        }
+        loggedAction('🔍 fetching sources', {}, async () => {
+            const hashpath = `https://forward.computer/${Constants.Subspace}~process@1.0/now/cache/subspace/sources/~json@1.0/serialize`
+            const res = await fetch(hashpath)
+            const resJson = await res.json() as Sources
 
-        const sources = this.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Sources-Response" })
-        if (sources && sources.Data) {
-            const sourcesData = JSON.parse(sources.Data)
-            this.sources = sourcesData as Sources
-            // fetch source src from arweave.net/Id
-            const fetchPromises = Object.values(this.sources).map(async (source) => {
-                if (source.Id) {
-                    const src = await fetch(`${this.gatewayUrl}/${source.Id}`).then(res => res.text())
-                    source.Lua = src
+            // const sources = this.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Sources-Response" })
+            if (resJson) {
+                this.sources = {
+                    Server: resJson.Server,
+                    Dm: resJson.Dm,
+                    Bot: resJson.Bot,
                 }
-            })
-            await Promise.all(fetchPromises)
-        }
-        return this.sources
+                // fetch source src from arweave.net/Id
+                const fetchPromises = Object.values(this.sources).map(async (source) => {
+                    if (source.Id) {
+                        const src = await fetch(`${this.gatewayUrl}/${source.Id}`).then(res => res.text())
+                        source.Lua = src
+                    }
+                })
+                await Promise.all(fetchPromises)
+            }
+            return this.sources
+        })
     }
 
     getAo() { return this.ao }
@@ -172,6 +219,12 @@ export class ConnectionManager {
             signer: this.getAoSigner(),
             tags,
         }
+
+        console.log("🔧 SDK DEBUG: Sending message", {
+            processId,
+            data,
+            tags
+        })
         const messageId: string = await this.ao.message(args)
 
         const res: MessageResult & { id: string } = await this.ao.result({
@@ -186,11 +239,9 @@ export class ConnectionManager {
 
     async dryrun({ processId, data, tags }: { processId: string, data?: string, tags: Tag[] }): Promise<MessageResult> {
         // For dryrun requests, we need a valid owner/wallet address
-        let owner = this.owner;
-
-        // If no owner is set or empty, use a placeholder address for read-only operations
+        const owner = this.owner;
         if (!owner || owner.trim() === "") {
-            owner = "placeholder-read-only-address";
+            throw new Error("Owner address is required for dryrun operations");
         }
         const res: MessageResult = await this.ao.dryrun({
             process: processId,

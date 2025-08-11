@@ -1,46 +1,16 @@
-sqlite3 = require("lsqlite3")
 json = require("json")
 
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = "H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY"
+Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
 Version = Version or "1.0.0"
 
-db = db or sqlite3.open_memory()
+-- Switched from sqlite to in-memory Lua tables
 
 ----------------------------------------------------------------------------
 
--- easily read from the database
-function SQLRead(query, ...)
-    local m = {}
-    local _ = 1
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        for row in stmt:nrows() do
-            -- table.insert(m, row)
-            m[_] = row
-            _ = _ + 1
-        end
-        stmt:finalize()
-    end
-    return m
-end
-
--- easily write to the database
-function SQLWrite(query, ...)
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        local step = stmt:step()
-        assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
-        stmt:finalize()
-    end
-    return db:changes()
-end
+-- No SQLRead/SQLWrite helpers needed anymore
 
 function VarOrNil(var)
     return var ~= "" and var or nil
@@ -64,129 +34,54 @@ end
 
 ----------------------------------------------------------------------------
 
--- dmUserId is always the friendId with whom Owner is dming with
--- authorId can either be the Owber or the friendId
-db:exec([[
-    CREATE TABLE IF NOT EXISTS messages (
-        messageId INTEGER PRIMARY KEY AUTOINCREMENT,
-        dmUserId TEXT NOT NULL,
-        authorId TEXT NOT NULL,
-        content TEXT NOT NULL,
-        attachments TEXT DEFAULT "[]",
-        replyTo INTEGER,
-        timestamp INTEGER NOT NULL,
-        edited INTEGER NOT NULL DEFAULT 0,
-        messageTxId TEXT UNIQUE,
-        FOREIGN KEY (replyTo) REFERENCES messages(messageId) ON DELETE SET NULL
-    );
+-- In-memory state
+dm_messages = dm_messages or {}           -- { [dmUserId] = { [messageId:string] = messageObj } }
+dm_nextMessageId = dm_nextMessageId or {} -- { [dmUserId] = nextId:number }
+dm_events = dm_events or {}               -- array of { eventId, eventType, messageId }
+dm_nextEventId = dm_nextEventId or 1
 
-    CREATE TABLE IF NOT EXISTS events (
-        eventId INTEGER PRIMARY KEY AUTOINCREMENT,
-        eventType TEXT, CHECK (eventType IN ("DELETE_MESSAGE", "EDIT_MESSAGE")),
-        messageId INTEGER,
-        FOREIGN KEY (messageId) REFERENCES messages(messageId)
-    );
-]])
+local function getNextMessageId(dmUserId)
+    local nextId = tonumber(dm_nextMessageId[dmUserId]) or 1
+    dm_nextMessageId[dmUserId] = nextId + 1
+    return nextId
+end
+
+local function appendEvent(eventType, messageId)
+    local eid = dm_nextEventId
+    dm_nextEventId = eid + 1
+    dm_events[#dm_events + 1] = { eventId = eid, eventType = eventType, messageId = messageId }
+    return eid
+end
 
 ----------------------------------------------------------------------------
 
-Handlers.add("Info", function(msg)
-    msg.reply({
-        Action = "Info-Response",
-        Status = "200",
-        Version = tostring(Version),
-        Owner_ = Owner
-    })
-end)
-
-Handlers.add("Get-DMs", function(msg)
-    assert(Owner == msg.From, "❌[auth error] Dm module not initialized")
-
-    local dmUserId = VarOrNil(msg.Tags.FriendId)
-    local limit = VarOrNil(msg.Tags.Limit)
-    local after = VarOrNil(msg.Tags.After)
-    local before = VarOrNil(msg.Tags.Before)
-    local eventId = VarOrNil(msg.Tags.EventId) -- eventId is the id of the last event fetched (optional)
-
-    -- debug print data
-    -- print("DM UserId: " .. (dmUserId or "nil"))
-    -- print("Limit: " .. (limit or "nil"))
-    -- print("After: " .. (after or "nil"))
-    -- print("Before: " .. (before or "nil"))
-    -- print("EventId: " .. (eventId or "nil"))
-    -- print("From: " .. msg.From)
-    -- print("Owner: " .. Owner)
-
-    local query = "SELECT * FROM messages"
-    local queryParams = {}
-
-    -- Build WHERE clause
-    local whereConditions = {}
-    if dmUserId then
-        table.insert(whereConditions, "dmUserId = ?")
-        table.insert(queryParams, dmUserId)
-    end
-
-    if after then
-        table.insert(whereConditions, "messageId > ?")
-        table.insert(queryParams, after)
-    end
-
-    if before then
-        table.insert(whereConditions, "messageId < ?")
-        table.insert(queryParams, before)
-    end
-
-    if #whereConditions > 0 then
-        query = query .. " WHERE " .. table.concat(whereConditions, " AND ")
-    end
-
-    query = query .. " ORDER BY messageId DESC"
-
-    if limit then
-        query = query .. " LIMIT ?"
-        table.insert(queryParams, limit)
-    end
-
-    local messages = SQLRead(query, table.unpack(queryParams))
-
-    local events = {}
-    if eventId then
-        events = SQLRead("SELECT * FROM events WHERE eventId > ?", eventId)
-        -- if event has an edited message, fetch the message from messages table and update in response.messages
-        for _, event in ipairs(events) do
-            if event.eventType == "EDIT_MESSAGE" then
-                if event.messageId < after then
-                    local message = SQLRead("SELECT * FROM messages WHERE messageId = ?", event.messageId)[1]
-                    table.insert(messages, message)
-                end
-            end
-        end
-    else
-        events = SQLRead("SELECT * FROM events ORDER BY eventId DESC")
-    end
-
-    local response = {
-        messages = messages,
-        events = events
+function SyncProcessState()
+    local state = {
+        version = tostring(Version),
+        owner = Owner,
+        messages = dm_messages,
+        events = dm_events,
     }
 
-    msg.reply({
-        Action = "Get-DMs-Response",
-        Status = "200",
-        Data = json.encode(response)
+    Send({
+        Target = ao.id,
+        device = "patch@1.0",
+        cache = { dms = state }
     })
-end)
+end
+
+----------------------------------------------------------------------------
+
 
 -- msg forwarded by Profiles
 Handlers.add("Send-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to add a dm")
 
     local authorId = msg["X-Origin"]
-    local dmUserId = msg.Tags.FriendId
+    local dmUserId = msg.Tags["Friend-Id"]
     local content = VarOrNil(msg.Data) or ""
     local attachments = VarOrNil(msg.Tags.Attachments) or "[]"
-    local replyTo = VarOrNil(msg.Tags.ReplyTo)
+    local replyTo = VarOrNil(msg.Tags["Reply-To"])
     local timestamp = tonumber(msg.Timestamp)
     local messageTxId = msg["X-Origin-Id"]
 
@@ -239,7 +134,8 @@ Handlers.add("Send-DM", function(msg)
     -- if replyTo is provided, it should be a number and a valid messageId in messages table
     if replyTo then
         replyTo = tonumber(replyTo)
-        local message = SQLRead("SELECT * FROM messages WHERE messageId = ? AND dmUserId = ?", replyTo, authorId)[1]
+        local bucket = dm_messages[dmUserId] or {}
+        local message = bucket[tostring(replyTo)]
         if ValidateCondition(not message, msg, {
                 Status = "400",
                 Data = json.encode({
@@ -250,10 +146,20 @@ Handlers.add("Send-DM", function(msg)
         end
     end
 
-    -- insert message into messages table
-    SQLWrite(
-        "INSERT INTO messages (dmUserId, authorId, content, attachments, replyTo, timestamp, messageTxId) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        dmUserId, authorId, content, attachments, replyTo, timestamp, messageTxId)
+    -- insert message into in-memory table
+    dm_messages[dmUserId] = dm_messages[dmUserId] or {}
+    local messageId = getNextMessageId(dmUserId)
+    dm_messages[dmUserId][tostring(messageId)] = {
+        messageId = messageId,
+        dmUserId = dmUserId,
+        authorId = authorId,
+        content = content,
+        attachments = attachments,
+        replyTo = replyTo,
+        timestamp = timestamp,
+        edited = 0,
+        messageTxId = messageTxId,
+    }
 
     -- send notification
     if authorId ~= Owner then
@@ -270,11 +176,12 @@ Handlers.add("Send-DM", function(msg)
         })
     end
 
+    SyncProcessState()
     msg.reply({
         Action = "Send-DM-Response",
         Status = "200",
         Data = json.encode({
-            messageId = db:last_insert_rowid()
+            messageId = messageId
         })
     })
 end)
@@ -282,8 +189,8 @@ end)
 Handlers.add("Delete-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to delete a dm")
 
-    local messageId = VarOrNil(msg.Tags.MessageId)
-    local dmUserId = VarOrNil(msg.Tags.FriendId)
+    local messageId = VarOrNil(msg.Tags["Message-Id"])
+    local dmUserId = VarOrNil(msg.Tags["Friend-Id"])
     local authorId = msg["X-Origin"]
 
     if ValidateCondition(not messageId, msg, {
@@ -326,9 +233,11 @@ Handlers.add("Delete-DM", function(msg)
         dmUserId = authorId
     end
 
-    -- fetch message from messages table if it exists
-    local message = SQLRead("SELECT * FROM messages WHERE messageId = ? AND authorId = ? AND dmUserId = ?", messageId,
-        authorId, dmUserId)[1]
+    -- fetch message from in-memory store
+    messageId = tonumber(messageId)
+    local bucket = dm_messages[dmUserId] or {}
+    local message = bucket[tostring(messageId)]
+    if message and message.authorId ~= authorId then message = nil end
     if ValidateCondition(not message, msg, {
             Status = "400",
             Data = json.encode({
@@ -338,12 +247,11 @@ Handlers.add("Delete-DM", function(msg)
         return
     end
 
-    -- delete message from messages table
-    SQLWrite("DELETE FROM messages WHERE messageId = ?", messageId)
+    -- delete message and record event
+    dm_messages[dmUserId][tostring(messageId)] = nil
+    appendEvent("DELETE_MESSAGE", messageId)
 
-    -- add delete event to events table
-    SQLWrite("INSERT INTO events (eventType, messageId) VALUES ('DELETE_MESSAGE', ?)", messageId)
-
+    SyncProcessState()
     msg.reply({
         Action = "Delete-DM-Response",
         Status = "200",
@@ -355,8 +263,8 @@ end)
 Handlers.add("Edit-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to edit a dm")
 
-    local messageId = VarOrNil(msg.Tags.MessageId)
-    local dmUserId = VarOrNil(msg.Tags.FriendId)
+    local messageId = VarOrNil(msg.Tags["Message-Id"])
+    local dmUserId = VarOrNil(msg.Tags["Friend-Id"])
     local authorId = msg["X-Origin"]
     local content = VarOrNil(msg.Data)
 
@@ -409,9 +317,11 @@ Handlers.add("Edit-DM", function(msg)
         return
     end
 
-    -- fetch message from messages table if it exists
-    local message = SQLRead("SELECT * FROM messages WHERE messageId = ? AND authorId = ? AND dmUserId = ?", messageId,
-        authorId, dmUserId)[1]
+    -- fetch message from in-memory store
+    messageId = tonumber(messageId)
+    local bucket = dm_messages[dmUserId] or {}
+    local message = bucket[tostring(messageId)]
+    if message and message.authorId ~= authorId then message = nil end
     if ValidateCondition(not message, msg, {
             Status = "400",
             Data = json.encode({
@@ -421,11 +331,12 @@ Handlers.add("Edit-DM", function(msg)
         return
     end
 
-    -- update message in messages table
-    SQLWrite("UPDATE messages SET content = ?, edited = 1 WHERE messageId = ?", content, messageId)
+    -- update message and record event
+    message.content = content
+    message.edited = 1
+    appendEvent("EDIT_MESSAGE", messageId)
 
-    -- add edit event to events table
-    SQLWrite("INSERT INTO events (eventType, messageId) VALUES ('EDIT_MESSAGE', ?)", messageId)
+    SyncProcessState()
 
     msg.reply({
         Action = "Edit-DM-Response",

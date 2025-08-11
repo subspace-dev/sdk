@@ -2,17 +2,20 @@ import { ConnectionManager } from "../connection-manager";
 import { Constants } from "../utils/constants";
 import { loggedAction } from "../utils/logger";
 import type { Tag } from "../types/ao";
+import { getPrimaryName, getWanderTierInfo, WanderTierInfo } from "../utils/lib";
 
 export interface Profile {
     userId: string;
     pfp?: string;
-    displayName?: string;
+    primaryName?: string;
+    wndrTier?: WanderTierInfo;
     bio?: string;
     banner?: string;
-    serversJoined: {
-        serverId: string;
+    // Key-value map of serverId -> server info
+    serversJoined: Record<string, {
         orderId: number;
-    }[];
+        serverApproved?: boolean;
+    }>;
     friends?: {
         accepted: string[]
         sent: string[]
@@ -55,47 +58,83 @@ export class UserManager {
 
     async getProfile(userId: string): Promise<Profile | null> {
         return loggedAction('🔍 getting profile', { userId }, async () => {
-            const res = await this.connectionManager.dryrun({
-                processId: Constants.Subspace,
-                tags: [
-                    { name: "Action", value: Constants.Actions.GetProfile },
-                    { name: "UserId", value: userId }
-                ]
-            });
-
-            const data = JSON.parse(this.connectionManager.parseOutput(res).Data);
-
-            if (data) {
-                if (data.error) throw new Error(data.error);
-                return data as Profile;
-            } else {
-                // Handle special case for owner creating new profile
-                if (userId == this.connectionManager.owner) {
-                    console.info("profile not found, creating new")
-                    const profileId = await this.createProfile()
-                    if (profileId) {
-                        return this.getProfile(userId)
-                    } else {
-                        return null
-                    }
-                }
-                return null;
+            let data: Profile | null = null
+            try {
+                data = await ConnectionManager.hashpathGET<Profile>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/${userId}/~json@1.0/serialize`)
+            } catch (e) {
+                throw new Error("[subspace-sdk] failed to get profile: " + e)
+                return null
             }
+
+            const wanderTierInfo = await getWanderTierInfo(userId)
+
+            const primaryName = await getPrimaryName(userId)
+
+            const profile: Profile = {
+                userId,
+                pfp: data.pfp || "",
+                delegations: data.delegations || [],
+                // Lua state stores serversJoined as a table keyed by serverId
+                // Normalize to an object map in TS
+                serversJoined: data.serversJoined || {},
+                dmProcess: data.dmProcess || "",
+                friends: data.friends || {
+                    accepted: [],
+                    sent: [],
+                    received: []
+                },
+                primaryName,
+                wndrTier: wanderTierInfo || undefined
+            }
+            return profile;
+            // const res = await this.connectionManager.dryrun({
+            //     processId: Constants.Subspace,
+            //     tags: [
+            //         { name: "Action", value: Constants.Actions.GetProfile },
+            //         { name: "UserId", value: userId }
+            //     ]
+            // });
+
+            // const data = JSON.parse(this.connectionManager.parseOutput(res).Data);
+
+            // if (data) {
+            //     if (data.error) throw new Error(data.error);
+            //     return data as Profile;
+            // } else {
+            //     // Handle special case for owner creating new profile
+            //     if (userId == this.connectionManager.owner) {
+            //         console.info("profile not found, creating new")
+            //         const profileId = await this.createProfile()
+            //         if (profileId) {
+            //             return this.getProfile(userId)
+            //         } else {
+            //             return null
+            //         }
+            //     }
+            //     return null;
+            // }
         });
     }
 
     async getBulkProfiles(userIds: string[]): Promise<Profile[]> {
         return loggedAction('🔍 getting bulk profiles', { userCount: userIds.length }, async () => {
-            const res = await this.connectionManager.dryrun({
-                processId: Constants.Subspace,
-                tags: [
-                    { name: "Action", value: Constants.Actions.GetBulkProfile },
-                    { name: "UserIds", value: JSON.stringify(userIds) }
-                ]
-            });
+            const profiles = await ConnectionManager.hashpathGET<Record<string, any>>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/~json@1.0/serialize`)
+            const profilesArray: Profile[] = []
+            for (const userId of userIds) {
+                const profile = profiles[userId]
+                profilesArray.push(profile)
+            }
+            return profilesArray
+            // const res = await this.connectionManager.dryrun({
+            //     processId: Constants.Subspace,
+            //     tags: [
+            //         { name: "Action", value: Constants.Actions.GetBulkProfile },
+            //         { name: "User-Ids", value: JSON.stringify(userIds) }
+            //     ]
+            // });
 
-            const data = JSON.parse(this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Get-Bulk-Profile-Response" }).Data);
-            return data || [];
+            // const data = JSON.parse(this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Get-Bulk-Profile-Response" }).Data);
+            // return data || [];
         });
     }
 
@@ -131,7 +170,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.CreateProfile },
-                    { name: "DmProcess", value: dmProcess }
+                    { name: "Dm-Process", value: dmProcess }
                 ]
             });
 
@@ -157,7 +196,7 @@ export class UserManager {
             ];
 
             if (params.pfp) tags.push({ name: "Pfp", value: params.pfp });
-            if (params.displayName) tags.push({ name: "DisplayName", value: params.displayName });
+            if (params.displayName) tags.push({ name: "Display-Name", value: params.displayName });
             if (params.bio) tags.push({ name: "Bio", value: params.bio });
             if (params.banner) tags.push({ name: "Banner", value: params.banner });
 
@@ -177,7 +216,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.GetNotifications },
-                    { name: "UserId", value: userId }
+                    { name: "User-Id", value: userId }
                 ]
             });
 
@@ -192,7 +231,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.SendFriendRequest },
-                    { name: "FriendId", value: userId }
+                    { name: "Friend-Id", value: userId }
                 ]
             });
 
@@ -207,7 +246,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.AcceptFriendRequest },
-                    { name: "FriendId", value: userId }
+                    { name: "Friend-Id", value: userId }
                 ]
             });
 
@@ -222,7 +261,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.RejectFriendRequest },
-                    { name: "FriendId", value: userId }
+                    { name: "Friend-Id", value: userId }
                 ]
             });
 
@@ -237,7 +276,7 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.RemoveFriend },
-                    { name: "FriendId", value: userId }
+                    { name: "Friend-Id", value: userId }
                 ]
             });
 
@@ -252,7 +291,7 @@ export class UserManager {
                 { name: "Action", value: Constants.Actions.GetDMs }
             ];
 
-            if (params.friendId) tags.push({ name: "FriendId", value: params.friendId });
+            if (params.friendId) tags.push({ name: "Friend-Id", value: params.friendId });
             if (params.limit) tags.push({ name: "Limit", value: params.limit.toString() });
             if (params.before) tags.push({ name: "Before", value: params.before });
             if (params.after) tags.push({ name: "After", value: params.after });
@@ -292,7 +331,7 @@ export class UserManager {
             ];
 
             if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
-            if (params.replyTo) tags.push({ name: "ReplyTo", value: params.replyTo.toString() });
+            if (params.replyTo) tags.push({ name: "Reply-To", value: params.replyTo.toString() });
 
             const res = await this.connectionManager.sendMessage({
                 processId: dmProcessId,
@@ -308,11 +347,11 @@ export class UserManager {
         return loggedAction('📤 sending DM to friend', { friendId, content: params.content.substring(0, 100) + (params.content.length > 100 ? '...' : '') }, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.SendDM },
-                { name: "FriendId", value: friendId }
+                { name: "Friend-Id", value: friendId }
             ];
 
             if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
-            if (params.replyTo) tags.push({ name: "ReplyTo", value: params.replyTo.toString() });
+            if (params.replyTo) tags.push({ name: "Reply-To", value: params.replyTo.toString() });
 
             const res = await this.connectionManager.sendMessage({
                 processId: Constants.Subspace,
@@ -331,7 +370,7 @@ export class UserManager {
                 processId: dmProcessId,
                 tags: [
                     { name: "Action", value: Constants.Actions.EditDM },
-                    { name: "MessageId", value: params.messageId },
+                    { name: "Message-Id", value: params.messageId },
                     { name: "Content", value: params.content }
                 ]
             });
@@ -347,8 +386,8 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.EditDM },
-                    { name: "FriendId", value: friendId },
-                    { name: "MessageId", value: params.messageId }
+                    { name: "Friend-Id", value: friendId },
+                    { name: "Message-Id", value: params.messageId }
                 ],
                 data: params.content
             });
@@ -364,7 +403,7 @@ export class UserManager {
                 processId: dmProcessId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteDM },
-                    { name: "MessageId", value: messageId }
+                    { name: "Message-Id", value: messageId }
                 ]
             });
 
@@ -379,8 +418,8 @@ export class UserManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteDM },
-                    { name: "FriendId", value: friendId },
-                    { name: "MessageId", value: messageId }
+                    { name: "Friend-Id", value: friendId },
+                    { name: "Message-Id", value: messageId }
                 ]
             });
 

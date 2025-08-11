@@ -3,7 +3,6 @@ export declare const Constants: {
     Authority: string;
     Scheduler: string;
     Module: string;
-    Profiles: string;
     CuEndpoints: string[];
     Actions: {
         GetProfile: string;

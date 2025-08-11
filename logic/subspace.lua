@@ -1,4 +1,4 @@
-sqlite3 = require("lsqlite3")
+-- sqlite3 = require("lsqlite3")
 json = require("json")
 
 ----------------------------------------------------------------------------
@@ -8,15 +8,15 @@ Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 
 Sources = {
     Bot = {
-        Id = "PKa7vZdJ-lLztZ1XXaO-5MUKH7Q7I49ljUrMslyQuxw",
+        Id = "c58ZvgjTgKAc6pej45GvCKU20YpgmVmqwPBB7Xg2aQo",
         Version = "1.0.0"
     },
     Dm = {
-        Id = "WAcds6-lHTVkmiUxT_UtKSpfsj2njHpyn7DEIi8Dhjk",
+        Id = "NhLyV8-sDhOZuh_omKf4CGxb16S0fymHLb_1tXG2CkA",
         Version = "1.0.0"
     },
     Server = {
-        Id = "dRi_Tm6iZ3ui4bRP3pRCdNH8E1V5bPMw9-hvCd9WbIs",
+        Id = "wBjC2H_rWcP04OR0HaAviOaUBtAP7xHn0dvCAn5rOLs",
         Version = "1.0.0"
     },
 }
@@ -32,38 +32,38 @@ end)
 
 ----------------------------------------------------------------------------
 
-db = db or sqlite3.open_memory()
+-- db = db or sqlite3.open_memory()
 
 -- easily read from the database
-function SQLRead(query, ...)
-    local m = {}
-    local _ = 1
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        for row in stmt:nrows() do
-            -- table.insert(m, row)
-            m[_] = row
-            _ = _ + 1
-        end
-        stmt:finalize()
-    end
-    return m
-end
+-- function SQLRead(query, ...)
+--     local m = {}
+--     local _ = 1
+--     local stmt = db:prepare(query)
+--     if stmt then
+--         local bind_res = stmt:bind_values(...)
+--         assert(bind_res, "❌[bind error] " .. db:errmsg())
+--         for row in stmt:nrows() do
+--             -- table.insert(m, row)
+--             m[_] = row
+--             _ = _ + 1
+--         end
+--         stmt:finalize()
+--     end
+--     return m
+-- end
 
--- easily write to the database
-function SQLWrite(query, ...)
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        local step = stmt:step()
-        assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
-        stmt:finalize()
-    end
-    return db:changes()
-end
+-- -- easily write to the database
+-- function SQLWrite(query, ...)
+--     local stmt = db:prepare(query)
+--     if stmt then
+--         local bind_res = stmt:bind_values(...)
+--         assert(bind_res, "❌[bind error] " .. db:errmsg())
+--         local step = stmt:step()
+--         assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
+--         stmt:finalize()
+--     end
+--     return db:changes()
+-- end
 
 function VarOrNil(var)
     return var ~= "" and var or nil
@@ -86,177 +86,206 @@ function ValidateCondition(condition, msg, body)
 end
 
 ----------------------------------------------------------------------------
+-- Migrate sqlite to simple lua tables
 
-db:exec([[
-    CREATE TABLE IF NOT EXISTS profiles (
-        userId TEXT PRIMARY KEY,
-        pfp TEXT DEFAULT "",
-        dmProcess TEXT DEFAULT ""
-    );
+profiles = profiles or {}               -- includes serversJoined, friends and delegations
+usedDmProcesses = usedDmProcesses or {} -- mapping for dmProcess to userId
+delegations = delegations or {}         -- mapping for delegated id to original id (only one delegation per user)
+servers = servers or {}
+bots = bots or {}                       -- includes botServers
 
-    CREATE TABLE IF NOT EXISTS serversJoined (
-        userId TEXT NOT NULL,
-        serverId TEXT NOT NULL,
-        orderId INTEGER DEFAULT 0,
-        PRIMARY KEY (userId, serverId)
-    );
+-- function CurrentStateToTables()
+--     local dbProfiles = SQLRead("SELECT * FROM profiles")
+--     for _, profile in ipairs(dbProfiles) do
+--         profiles[profile.userId] = {
+--             pfp = profile.pfp,
+--             dmProcess = profile.dmProcess,
+--             serversJoined = {},
+--             friends = {
+--                 accepted = {},
+--                 sent = {},
+--                 received = {}
+--             },
+--             delegations = {}
+--         }
+--     end
 
-    CREATE TABLE IF NOT EXISTS friends (
-        senderId TEXT NOT NULL,
-        receiverId TEXT NOT NULL,
-        accepted INTEGER DEFAULT 0,
-        PRIMARY KEY (senderId, receiverId)
-    );
+--     local serversJoined = SQLRead("SELECT * FROM serversJoined")
+--     for _, serverJoined in ipairs(serversJoined) do
+--         profiles[serverJoined.userId].serversJoined[serverJoined.serverId] = { orderId = serverJoined.orderId }
+--     end
 
-    CREATE TABLE IF NOT EXISTS servers (
-        serverId TEXT PRIMARY KEY,
-        publicServer INTEGER DEFAULT 1,
-        userId TEXT NOT NULL
-    );
+--     local servers = SQLRead("SELECT * FROM servers")
+--     for _, server in ipairs(servers) do
+--         servers[server.serverId] = {
+--             publicServer = server.publicServer,
+--             ownerId = server.userId
+--         }
+--     end
+-- end
 
-    CREATE TABLE IF NOT EXISTS notifications (
-        notificationId INTEGER PRIMARY KEY AUTOINCREMENT,
-        serverOrDmId TEXT NOT NULL,
-        fromUserId TEXT NOT NULL,
-        forUserId TEXT NOT NULL,
-        timestamp INTEGER DEFAULT 0,
-        source TEXT NOT NULL CHECK (source IN ('SERVER', 'DM')),
-        channelId INTEGER,
-        serverName TEXT,
-        channelName TEXT,
-        authorName TEXT,
-        messageTxId TEXT,
+----------------------------------------------------------------------------
 
-        FOREIGN KEY (fromUserId) REFERENCES profiles(userId),
-        FOREIGN KEY (forUserId) REFERENCES profiles(userId),
-        CHECK (
-            (source = 'SERVER' AND channelId IS NOT NULL) OR
-            (source = 'DM' AND channelId IS NULL)
-        )
-    );
+-- db:exec([[
+--     CREATE TABLE IF NOT EXISTS profiles (
+--         userId TEXT PRIMARY KEY,
+--         pfp TEXT DEFAULT "",
+--         dmProcess TEXT DEFAULT ""
+--     );
 
-    CREATE TABLE IF NOT EXISTS delegations (
-        userId TEXT NOT NULL,
-        delegatedUserId TEXT NOT NULL,
-        PRIMARY KEY (userId, delegatedUserId)
-    );
+--     CREATE TABLE IF NOT EXISTS serversJoined (
+--         userId TEXT NOT NULL,
+--         serverId TEXT NOT NULL,
+--         orderId INTEGER DEFAULT 0,
+--         PRIMARY KEY (userId, serverId)
+--     );
 
-    CREATE TABLE IF NOT EXISTS bots (
-        userId TEXT NOT NULL,
-        botProcess TEXT PRIMARY KEY,
-        botName TEXT NOT NULL,
-        botPfp TEXT NOT NULL,
-        botPublic INTEGER DEFAULT 0,
+--     CREATE TABLE IF NOT EXISTS friends (
+--         senderId TEXT NOT NULL,
+--         receiverId TEXT NOT NULL,
+--         accepted INTEGER DEFAULT 0,
+--         PRIMARY KEY (senderId, receiverId)
+--     );
 
-        FOREIGN KEY (userId) REFERENCES profiles(userId)
-    );
+--     CREATE TABLE IF NOT EXISTS servers (
+--         serverId TEXT PRIMARY KEY,
+--         publicServer INTEGER DEFAULT 1,
+--         userId TEXT NOT NULL
+--     );
 
-    CREATE TABLE IF NOT EXISTS botServers (
-        botProcess TEXT NOT NULL,
-        serverId TEXT NOT NULL,
-        PRIMARY KEY (botProcess, serverId)
+--     CREATE TABLE IF NOT EXISTS notifications (
+--         notificationId INTEGER PRIMARY KEY AUTOINCREMENT,
+--         serverOrDmId TEXT NOT NULL,
+--         fromUserId TEXT NOT NULL,
+--         forUserId TEXT NOT NULL,
+--         timestamp INTEGER DEFAULT 0,
+--         source TEXT NOT NULL CHECK (source IN ('SERVER', 'DM')),
+--         channelId INTEGER,
+--         serverName TEXT,
+--         channelName TEXT,
+--         authorName TEXT,
+--         messageTxId TEXT,
 
-        FOREIGN KEY (botProcess) REFERENCES bots(botProcess)
-        FOREIGN KEY (serverId) REFERENCES servers(serverId)
-    );
-]])
+--         FOREIGN KEY (fromUserId) REFERENCES profiles(userId),
+--         FOREIGN KEY (forUserId) REFERENCES profiles(userId),
+--         CHECK (
+--             (source = 'SERVER' AND channelId IS NOT NULL) OR
+--             (source = 'DM' AND channelId IS NULL)
+--         )
+--     );
+
+--     CREATE TABLE IF NOT EXISTS delegations (
+--         userId TEXT NOT NULL,
+--         delegatedUserId TEXT NOT NULL,
+--         PRIMARY KEY (userId, delegatedUserId)
+--     );
+
+--     CREATE TABLE IF NOT EXISTS bots (
+--         userId TEXT NOT NULL,
+--         botProcess TEXT PRIMARY KEY,
+--         botName TEXT NOT NULL,
+--         botPfp TEXT NOT NULL,
+--         botPublic INTEGER DEFAULT 0,
+
+--         FOREIGN KEY (userId) REFERENCES profiles(userId)
+--     );
+
+--     CREATE TABLE IF NOT EXISTS botServers (
+--         botProcess TEXT NOT NULL,
+--         serverId TEXT NOT NULL,
+--         PRIMARY KEY (botProcess, serverId)
+
+--         FOREIGN KEY (botProcess) REFERENCES bots(botProcess)
+--         FOREIGN KEY (serverId) REFERENCES servers(serverId)
+--     );
+-- ]])
 
 -- table helper functions
 
 function GetProfile(userId)
-    local profile = SQLRead("SELECT * FROM profiles WHERE userId = ?", userId)
-    if profile and #profile > 0 then
-        profile = profile[1]
-        local servers = SQLRead("SELECT serverId,orderId FROM serversJoined WHERE userId = ? ORDER BY orderId ASC",
-            userId)
-        local delegations = SQLRead("SELECT * FROM delegations WHERE userId = ?", userId)
-
-        local friendData = {
-            accepted = {},
-            sent = {},
-            received = {}
-        }
-        -- Use the new friend helper functions to get organized friend data
-        local acceptedFriends = GetUserFriends(userId)
-        local friendRequestsReceived = GetFriendRequestsReceived(userId)
-        local friendRequestsSent = GetFriendRequestsSent(userId)
-
-        -- Extract just the friend IDs for the accepted friends
-        local acceptedFriendIds = {}
-        for _, friend in ipairs(acceptedFriends) do
-            table.insert(acceptedFriendIds, friend.friendId)
-        end
-        friendData.accepted = acceptedFriendIds
-
-        -- Extract sender IDs for received requests
-        local receivedRequestIds = {}
-        for _, request in ipairs(friendRequestsReceived) do
-            table.insert(receivedRequestIds, request.senderId)
-        end
-        friendData.received = receivedRequestIds
-
-        -- Extract receiver IDs for sent requests
-        local sentRequestIds = {}
-        for _, request in ipairs(friendRequestsSent) do
-            table.insert(sentRequestIds, request.receiverId)
-        end
-        friendData.sent = sentRequestIds
-
-        local delegationsData = {}
-        for _, delegation in ipairs(delegations) do
-            table.insert(delegationsData, delegation.delegatedUserId)
-        end
-
-        profile.serversJoined = servers
-        profile.friends = friendData
-        profile.delegations = delegationsData
-        return profile
-    else
+    local profile = profiles[userId]
+    if not profile then
         return nil
     end
+    return profile
 end
 
-function GetOriginalId(userId)
+function GetOriginalId(delegationOrOriginalId)
     -- userId can either be the originalId or the delegatedId
     -- always return the originalId
     -- a user can have multiple delegations
-    local delegations = SQLRead("SELECT * FROM delegations WHERE delegatedUserId = ?", userId)
-    if delegations and #delegations > 0 then
-        return delegations[1].userId
+    local originalId = delegations[delegationOrOriginalId]
+    if originalId then
+        local profile = GetProfile(originalId)
+        -- verify that the delegation is valid
+        if profile and profile.delegations[delegationOrOriginalId] then
+            return originalId
+        else
+            return nil
+        end
     else
-        return userId
+        return delegationOrOriginalId
     end
+end
+
+function GetServer(serverId)
+    local server = servers[serverId]
+    if not server then
+        return nil
+    end
+    return server
 end
 
 function ServerExists(serverId)
-    local servers = SQLRead("SELECT * FROM servers WHERE serverId = ?", serverId)
-    return servers and #servers > 0
+    return GetServer(serverId) ~= nil
 end
 
 function ServerIsPublic(serverId)
-    local servers = SQLRead("SELECT * FROM servers WHERE serverId = ?", serverId)
-    return servers and #servers > 0 and servers[1].publicServer == 1
+    local server = GetServer(serverId)
+    return server and server.publicServer
 end
 
 function UserInServer(userId, serverId)
-    if not userId or not serverId then
-        return false
-    end
-
-    local servers = SQLRead("SELECT * FROM serversJoined WHERE userId = ? AND serverId = ?", userId, serverId)
-    return servers and #servers > 0
+    local profile = GetProfile(userId)
+    return profile and profile.serversJoined[tostring(serverId)] ~= nil
 end
 
 -- Helper function to resequence servers for a specific user
 function ResequenceUserServers(userId)
-    local servers = SQLRead("SELECT serverId FROM serversJoined WHERE userId = ? ORDER BY orderId ASC", userId)
-
-    -- Resequence starting from 1
-    for i, server in ipairs(servers) do
-        SQLWrite("UPDATE serversJoined SET orderId = ? WHERE userId = ? AND serverId = ?", i, userId, server.serverId)
+    local profile = GetProfile(userId)
+    if not profile then
+        return 0
     end
 
-    return #servers
+    -- Keep serversJoined keyed by serverId; just normalize orderId values to 1..n
+    local entries = {}
+    for serverId, info in pairs(profile.serversJoined) do
+        table.insert(entries, { id = tostring(serverId), orderId = tonumber(info.orderId) or 0 })
+    end
+    table.sort(entries, function(a, b)
+        return a.orderId < b.orderId
+    end)
+    local count = 0
+    for index, entry in ipairs(entries) do
+        local sv = profile.serversJoined[entry.id]
+        if sv then
+            sv.orderId = index
+            profile.serversJoined[entry.id] = sv
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- Helper to compute next order id for serversJoined for a given profile
+local function GetNextServerOrderId(profile)
+    if not profile or not profile.serversJoined then return 1 end
+    local maxOrder = 0
+    for _, info in pairs(profile.serversJoined) do
+        local ord = tonumber(info.orderId) or 0
+        if ord > maxOrder then maxOrder = ord end
+    end
+    return maxOrder + 1
 end
 
 ----------------------------------------------------------------------------
@@ -267,25 +296,13 @@ function SyncProcessState()
     -- Everything must be in a JSON like structure
     -- This function should be called everytime after a change is made to the server
 
-    local profiles = SQLRead("SELECT * FROM profiles")
-    local servers = SQLRead("SELECT * FROM servers")
-    local serversJoined = SQLRead("SELECT * FROM serversJoined")
-    local friends = SQLRead("SELECT * FROM friends")
-    local delegations = SQLRead("SELECT * FROM delegations")
-    local bots = SQLRead("SELECT * FROM bots")
-    local botServers = SQLRead("SELECT * FROM botServers")
-    local notifications = SQLRead("SELECT * FROM notifications")
-
     local state = {
         sources = Sources,
         profiles = profiles,
         servers = servers,
-        serversJoined = serversJoined,
-        friends = friends,
         delegations = delegations,
         bots = bots,
-        botServers = botServers,
-        notifications = notifications
+        notifications = notifications,
     }
 
     -- Special message to the patch device which will update the cache in hyperbeam nodes
@@ -301,7 +318,7 @@ end
 
 Handlers.add("Create-Profile", function(msg)
     local userId = msg.From
-    local dmProcess = VarOrNil(msg.Tags.DmProcess)
+    local dmProcess = VarOrNil(msg.Tags["Dm-Process"])
 
     -- check if profile already exists
     local profile = GetProfile(userId)
@@ -327,81 +344,94 @@ Handlers.add("Create-Profile", function(msg)
     end
 
     -- make sure that this dmProcess is not already in the database
-    local dmProcessExists = SQLRead("SELECT * FROM profiles WHERE dmProcess = ?", dmProcess)
-    if dmProcessExists and #dmProcessExists > 0 then
-        msg.reply({
-            Action = "Create-Profile-Response",
+    if ValidateCondition(usedDmProcesses[dmProcess], msg, {
             Status = "400",
             Data = json.encode({
                 error = "Dm process already exists"
             })
         })
+    then
         return
     end
 
     -- create profile
-    SQLWrite("INSERT OR REPLACE INTO profiles (userId, dmProcess) VALUES (?, ?)", userId, dmProcess)
+    profiles[userId] = {
+        pfp = "",
+        dmProcess = dmProcess,
+        serversJoined = {},
+        friends = {
+            accepted = {},
+            sent = {},
+            received = {}
+        },
+        delegations = {},
+        notifications = {},
+        nextNotificationId = 1
+    }
+    usedDmProcesses[dmProcess] = userId
+
+    SyncProcessState()
 
     msg.reply({
         Action = "Create-Profile-Response",
         Status = "200",
         Data = json.encode({
             success = "Profile created"
-        }),
-        ProfileId = dmProcess
-    })
-end)
-
-Handlers.add("Get-Profile", function(msg)
-    local userId = VarOrNil(msg.Tags.UserId) or msg.From
-    userId = GetOriginalId(userId)
-
-    local profile = GetProfile(userId)
-    if ValidateCondition(not profile, msg, {
-            Status = "404",
-            Data = json.encode({
-                error = "Profile not found"
-            })
         })
-    then
-        return
-    end
-
-    msg.reply({
-        Action = "Get-Profile-Response",
-        Status = "200",
-        Data = json.encode(profile)
     })
 end)
 
-Handlers.add("Get-Bulk-Profile", function(msg)
-    local userIds = VarOrNil(msg.Tags.UserIds)
-    if ValidateCondition(not userIds, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "userIds is required"
-            })
-        })
-    then
-        return
-    end
+-- all get requests will now be handled by hyperbeam URL calls by reading the patch cache
+-- Handlers.add("Get-Profile", function(msg)
+--     local userId = VarOrNil(msg.Tags.UserId) or msg.From
+--     userId = GetOriginalId(userId)
 
-    userIds = json.decode(userIds)
+--     local profile = GetProfile(userId)
+--     if ValidateCondition(not profile, msg, {
+--             Status = "404",
+--             Data = json.encode({
+--                 error = "Profile not found"
+--             })
+--         })
+--     then
+--         return
+--     end
 
-    local profiles = {}
-    for _, userId in ipairs(userIds) do
-        local profile = GetProfile(userId)
-        if profile then
-            table.insert(profiles, profile)
-        end
-    end
+--     msg.reply({
+--         Action = "Get-Profile-Response",
+--         Status = "200",
+--         Data = json.encode(profile)
+--     })
+-- end)
 
-    msg.reply({
-        Action = "Get-Bulk-Profile-Response",
-        Status = "200",
-        Data = json.encode(profiles)
-    })
-end)
+-- Handlers.add("Get-Bulk-Profile", function(msg)
+--     local userIds = VarOrNil(msg.Tags.UserIds)
+--     if ValidateCondition(not userIds, msg, {
+--             Status = "400",
+--             Data = json.encode({
+--                 error = "userIds is required"
+--             })
+--         })
+--     then
+--         return
+--     end
+
+--     userIds = json.decode(userIds)
+
+--     local profiles = {}
+--     for _, userId in ipairs(userIds) do
+--         local profile = GetProfile(userId)
+--         if profile then
+--             table.insert(profiles, profile)
+--         end
+--     end
+
+--     msg.reply({
+--         Action = "Get-Bulk-Profile-Response",
+--         Status = "200",
+--         Data = json.encode(profiles)
+--     })
+-- end)
 
 Handlers.add("Update-Profile", function(msg)
     local userId = msg.From
@@ -421,9 +451,11 @@ Handlers.add("Update-Profile", function(msg)
 
     if pfp then
         profile.pfp = pfp
-        SQLWrite("UPDATE profiles SET pfp = ? WHERE userId = ?", pfp, userId)
     end
 
+    profiles[userId] = profile
+
+    SyncProcessState()
     msg.reply({
         Action = "Update-Profile-Response",
         Status = "200",
@@ -434,25 +466,25 @@ end)
 ----------------------------------------------------------------------------
 --- DELEGATIONS
 
-Handlers.add("Get-Original-Id", function(msg)
-    local userId = VarOrNil(msg.Tags.UserId)
-    if ValidateCondition(not userId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "userId is required"
-            })
-        })
-    then
-        return
-    end
+-- Handlers.add("Get-Original-Id", function(msg)
+--     local userId = VarOrNil(msg.Tags.UserId)
+--     if ValidateCondition(not userId, msg, {
+--             Status = "400",
+--             Data = json.encode({
+--                 error = "userId is required"
+--             })
+--         })
+--     then
+--         return
+--     end
 
-    local originalId = GetOriginalId(userId)
-    msg.reply({
-        Action = "Get-Original-Id-Response",
-        Status = "200",
-        OriginalId = originalId
-    })
-end)
+--     local originalId = GetOriginalId(userId)
+--     msg.reply({
+--         Action = "Get-Original-Id-Response",
+--         Status = "200",
+--         OriginalId = originalId
+--     })
+-- end)
 
 Handlers.add("Add-Delegation", function(msg)
 
@@ -473,7 +505,7 @@ end)
 Handlers.add("Create-Server", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local serverProcess = VarOrNil(msg.Tags.ServerProcess)
+    local serverProcess = VarOrNil(msg.Tags["Server-Process"])
 
     local profile = GetProfile(userId)
     if ValidateCondition(not profile, msg, {
@@ -507,18 +539,27 @@ Handlers.add("Create-Server", function(msg)
         return
     end
 
-    SQLWrite("INSERT INTO servers (serverId, userId) VALUES (?, ?)", serverProcess, userId)
+    servers[serverProcess] = {
+        ownerId = userId,
+        publicServer = true
+    }
 
+    profiles[userId].serversJoined[serverProcess] = {
+        orderId = GetNextServerOrderId(profiles[userId]),
+        serverApproved = false
+    }
+
+    SyncProcessState()
     msg.reply({
         Action = "Create-Server-Response",
         Status = "200",
-        ServerId = serverProcess
+        ["Server-Id"] = serverProcess
     })
 end)
 
 Handlers.add("Update-Server", function(msg)
     local serverId = msg.From
-    local publicServer = VarOrNil(msg.Tags.PublicServer)
+    local publicServer = (VarOrNil(msg.Tags["Public-Server"]) == "true") -- bool
 
     if ValidateCondition(not ServerExists(serverId), msg, {
             Status = "404",
@@ -530,27 +571,85 @@ Handlers.add("Update-Server", function(msg)
         return
     end
 
-    if publicServer then publicServer = (publicServer == "true") end
-    if publicServer then
-        publicServer = 1
-    else
-        publicServer = 0
+    local server = GetServer(serverId)
+    if ValidateCondition(not server, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Server not found"
+            })
+        })
+    then
+        return
     end
+    server.publicServer = publicServer
+    servers[serverId] = server
 
-    SQLWrite("UPDATE servers SET publicServer = ? WHERE serverId = ?", publicServer, serverId)
-
+    SyncProcessState()
     msg.reply({
         Action = "Update-Server-Response",
         Status = "200",
+        Data = json.encode(server)
     })
 end)
 
+-- users need to call this frist, before actually joining server
+-- To prevent any server from listing themself on the users profile
+Handlers.add("Approve-Join-Server", function(msg)
+    local userId = msg.From
+    userId = GetOriginalId(userId)
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
 
+    local profile = GetProfile(userId)
+    if ValidateCondition(not profile, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Profile not found"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not serverId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "ServerId is required"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not ServerExists(serverId), msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Server not found"
+            })
+        })
+    then
+        return
+    end
+
+    profile.serversJoined[tostring(serverId)] = {
+        orderId = GetNextServerOrderId(profile),
+        serverApproved = false -- Show the user this server only when serverApproves the join request
+    }
+
+    profiles[userId] = profile
+
+    SyncProcessState()
+    msg.reply({
+        Action = "Approve-Join-Server-Response",
+        Status = "200",
+        Data = json.encode(profile)
+    })
+end)
 
 -- Handler for when a server notifies us that a user has joined
 Handlers.add("User-Joined-Server", function(msg)
     local serverId = msg.From
-    local userId = VarOrNil(msg.Tags.UserId)
+    local userId = VarOrNil(msg.Tags["User-Id"])
+    local serverApproved = (VarOrNil(msg.Tags["Server-Approved"]) == "true") -- bool
 
     -- Validate that the message comes from a known server
     if ValidateCondition(not ServerExists(serverId), msg, {
@@ -574,32 +673,38 @@ Handlers.add("User-Joined-Server", function(msg)
     end
 
     userId = GetOriginalId(userId)
+    local profile = GetProfile(userId)
 
-    -- Check if user already in server
-    if UserInServer(userId, serverId) then
+    -- Check if user has approved the join request
+    if not profile.serversJoined[tostring(serverId)] then
         msg.reply({
             Action = "User-Joined-Server-Response",
-            Status = "200",
+            Status = "400",
             Data = json.encode({
-                message = "User already in server"
+                error = "User has not approved the join request"
             })
         })
         return
     end
-
-    -- Get the current max order for the user's servers and place new server at the end
-    local maxOrderResult = SQLRead("SELECT MAX(orderId) as maxOrder FROM serversJoined WHERE userId = ?", userId)[1]
-    local newOrderId = 1
-    if maxOrderResult and maxOrderResult.maxOrder then
-        newOrderId = maxOrderResult.maxOrder + 1
+    if ValidateCondition(not serverApproved, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Server has not approved the join request"
+            })
+        })
+    then
+        profile.serversJoined[tostring(serverId)] = nil
+        profiles[userId] = profile
+        return
     end
 
-    SQLWrite("INSERT OR REPLACE INTO serversJoined (userId, serverId, orderId) VALUES (?, ?, ?)", userId, serverId,
-        newOrderId)
+    profile.serversJoined[tostring(serverId)].serverApproved = serverApproved
+    profiles[userId] = profile
 
     -- Resequence to ensure clean ordering
     ResequenceUserServers(userId)
 
+    SyncProcessState()
     msg.reply({
         Action = "User-Joined-Server-Response",
         Status = "200",
@@ -612,7 +717,7 @@ end)
 -- Handler for when a server notifies us that a user has left
 Handlers.add("User-Left-Server", function(msg)
     local serverId = msg.From
-    local userId = VarOrNil(msg.Tags.UserId)
+    local userId = VarOrNil(msg.Tags["User-Id"])
     local reason = VarOrNil(msg.Tags.Reason) -- "left", "kicked", "banned"
 
     -- Validate that the message comes from a known server
@@ -650,11 +755,13 @@ Handlers.add("User-Left-Server", function(msg)
         return
     end
 
-    SQLWrite("DELETE FROM serversJoined WHERE userId = ? AND serverId = ?", userId, serverId)
+    -- SQLWrite("DELETE FROM serversJoined WHERE userId = ? AND serverId = ?", userId, serverId)
+    profiles[userId].serversJoined[tostring(serverId)] = nil
 
     -- Resequence to ensure clean ordering after removal
     ResequenceUserServers(userId)
 
+    SyncProcessState()
     msg.reply({
         Action = "User-Left-Server-Response",
         Status = "200",
@@ -668,8 +775,8 @@ end)
 Handlers.add("Update-Server-Order", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local serverId = VarOrNil(msg.Tags.ServerId)
-    local orderId = VarOrNil(msg.Tags.OrderId)
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
+    local orderId = VarOrNil(msg.Tags["Order-Id"])
 
     if orderId then orderId = tonumber(orderId) end
 
@@ -725,8 +832,10 @@ Handlers.add("Update-Server-Order", function(msg)
     end
 
     -- Get current server order info
-    local currentServerInfo = SQLRead("SELECT orderId FROM serversJoined WHERE userId = ? AND serverId = ?", userId,
-        serverId)[1]
+    -- local currentServerInfo = SQLRead("SELECT orderId FROM serversJoined WHERE userId = ? AND serverId = ?", userId,
+    --     serverId)[1]
+    local currentServerInfo = profiles[userId].serversJoined[tostring(serverId)]
+
     if ValidateCondition(not currentServerInfo, msg, {
             Status = "500",
             Data = json.encode({
@@ -752,61 +861,62 @@ Handlers.add("Update-Server-Order", function(msg)
     end
 
     -- Begin transaction for atomic updates
-    db:exec("BEGIN TRANSACTION")
-    local success = true
+    -- db:exec("BEGIN TRANSACTION")
+    -- local success = true
 
-    -- Handle ordering changes
-    if orderId < currentOrder then
-        -- Moving up: shift other servers down
-        SQLWrite([[
-            UPDATE serversJoined
-            SET orderId = orderId + 1
-            WHERE userId = ? AND orderId >= ? AND orderId < ? AND serverId != ?
-        ]], userId, orderId, currentOrder, serverId)
-    else
-        -- Moving down: shift other servers up
-        SQLWrite([[
-            UPDATE serversJoined
-            SET orderId = orderId - 1
-            WHERE userId = ? AND orderId > ? AND orderId <= ? AND serverId != ?
-        ]], userId, currentOrder, orderId, serverId)
-    end
+    -- -- Handle ordering changes
+    -- if orderId < currentOrder then
+    --     -- Moving up: shift other servers down
+    --     SQLWrite([[
+    --         UPDATE serversJoined
+    --         SET orderId = orderId + 1
+    --         WHERE userId = ? AND orderId >= ? AND orderId < ? AND serverId != ?
+    --     ]], userId, orderId, currentOrder, serverId)
+    -- else
+    --     -- Moving down: shift other servers up
+    --     SQLWrite([[
+    --         UPDATE serversJoined
+    --         SET orderId = orderId - 1
+    --         WHERE userId = ? AND orderId > ? AND orderId <= ? AND serverId != ?
+    --     ]], userId, currentOrder, orderId, serverId)
+    -- end
 
-    -- Update the server's order
-    local rows = SQLWrite([[
-        UPDATE serversJoined
-        SET orderId = ?
-        WHERE userId = ? AND serverId = ?
-    ]], orderId, userId, serverId)
+    -- -- Update the server's order
+    -- local rows = SQLWrite([[
+    --     UPDATE serversJoined
+    --     SET orderId = ?
+    --     WHERE userId = ? AND serverId = ?
+    -- ]], orderId, userId, serverId)
 
-    if rows ~= 1 then
-        success = false
+    -- if rows ~= 1 then
+    --     success = false
+    -- end
+
+    for serverId_, server in pairs(profiles[userId].serversJoined) do
+        if serverId_ == tostring(serverId) then
+            server.orderId = orderId
+            profiles[userId].serversJoined[serverId_] = server
+        end
+        if server.orderId >= orderId and server.orderId < currentOrder then
+            server.orderId = server.orderId + 1
+            profiles[userId].serversJoined[serverId_] = server
+        elseif server.orderId > orderId and server.orderId <= currentOrder then
+            server.orderId = server.orderId - 1
+            profiles[userId].serversJoined[serverId_] = server
+        end
     end
 
     -- Resequence to ensure clean ordering
-    if success then
-        ResequenceUserServers(userId)
-    end
+    ResequenceUserServers(userId)
 
-    if success then
-        db:exec("COMMIT")
-        -- Get updated profile
-        local updatedProfile = GetProfile(userId)
-        msg.reply({
-            Action = "Update-Server-Order-Response",
-            Status = "200",
-            Data = json.encode(updatedProfile)
-        })
-    else
-        db:exec("ROLLBACK")
-        msg.reply({
-            Action = "Update-Server-Order-Response",
-            Status = "500",
-            Data = json.encode({
-                error = "Failed to update server order"
-            })
-        })
-    end
+    -- Get updated profile
+    local updatedProfile = GetProfile(userId)
+    SyncProcessState()
+    msg.reply({
+        Action = "Update-Server-Order-Response",
+        Status = "200",
+        Data = json.encode(updatedProfile)
+    })
 end)
 
 
@@ -816,79 +926,135 @@ end)
 
 -- Helper function to check if two users are friends
 function IsFriend(userId1, userId2)
-    local result = SQLRead(
-        "SELECT * FROM friends WHERE ((senderId = ? AND receiverId = ?) OR (senderId = ? AND receiverId = ?)) AND accepted = 1",
-        userId1, userId2, userId2, userId1)
-    return #result > 0
+    -- local result = SQLRead(
+    --     "SELECT * FROM friends WHERE ((senderId = ? AND receiverId = ?) OR (senderId = ? AND receiverId = ?)) AND accepted = 1",
+    --     userId1, userId2, userId2, userId1)
+    local p1 = GetProfile(userId1)
+    local p2 = GetProfile(userId2)
+    return p1 and p2 and (p1.friends.accepted[userId2] and p2.friends.accepted[userId1])
 end
 
 -- Helper function to check if a friend request exists
 function FriendRequestExists(senderId, receiverId)
-    local result = SQLRead(
-        "SELECT * FROM friends WHERE senderId = ? AND receiverId = ?",
-        senderId, receiverId)
-    return #result > 0
+    -- local result = SQLRead(
+    --     "SELECT * FROM friends WHERE senderId = ? AND receiverId = ?",
+    --     senderId, receiverId)
+    -- return #result > 0
+    local p1 = GetProfile(senderId)
+    local p2 = GetProfile(receiverId)
+    return p1 and p2 and
+        ((p1.friends.sent[receiverId] and p2.friends.received[senderId]) or (p1.friends.received[receiverId] and p2.friends.sent[senderId]))
 end
 
 -- Helper function to check if there's a pending friend request
 function HasPendingFriendRequest(senderId, receiverId)
-    local result = SQLRead(
-        "SELECT * FROM friends WHERE senderId = ? AND receiverId = ? AND accepted = 0",
-        senderId, receiverId)
-    return #result > 0
+    -- local result = SQLRead(
+    --     "SELECT * FROM friends WHERE senderId = ? AND receiverId = ? AND accepted = 0",
+    --     senderId, receiverId)
+    -- return #result > 0
+    local p1 = GetProfile(senderId)
+    local p2 = GetProfile(receiverId)
+    -- Pending exists if sender has sent to receiver AND receiver has not accepted yet (they should have it in received)
+    return p1 and p2 and (p1.friends.sent[receiverId] and p2.friends.received[senderId])
 end
 
 -- Helper function to send a friend request
 function SendFriendRequest(senderId, receiverId)
-    SQLWrite("INSERT OR IGNORE INTO friends (senderId, receiverId, accepted) VALUES (?, ?, 0)",
-        senderId, receiverId)
+    -- SQLWrite("INSERT OR IGNORE INTO friends (senderId, receiverId, accepted) VALUES (?, ?, 0)",
+    --     senderId, receiverId)
+    local p1 = GetProfile(senderId)
+    local p2 = GetProfile(receiverId)
+    if p1 and p2 then
+        p1.friends.sent[receiverId] = true
+        p2.friends.received[senderId] = true
+    end
 end
 
 -- Helper function to accept a friend request
 function AcceptFriendRequest(senderId, receiverId)
-    SQLWrite("UPDATE friends SET accepted = 1 WHERE senderId = ? AND receiverId = ?", senderId, receiverId)
+    -- SQLWrite("UPDATE friends SET accepted = 1 WHERE senderId = ? AND receiverId = ?", senderId, receiverId)
+    local p1 = GetProfile(senderId)
+    local p2 = GetProfile(receiverId)
+
+    if p1 and p2 then
+        -- check if a friend request was made before accepting
+        if not p1.friends.sent[receiverId] or not p2.friends.received[senderId] then
+            return
+        end
+        p1.friends.accepted[receiverId] = true
+        p1.friends.sent[receiverId] = nil
+        p2.friends.accepted[senderId] = true
+        p2.friends.received[senderId] = nil
+    end
 end
 
 -- Helper function to reject/remove a friend request
 function RejectFriendRequest(senderId, receiverId)
-    SQLWrite("DELETE FROM friends WHERE senderId = ? AND receiverId = ?", senderId, receiverId)
+    -- SQLWrite("DELETE FROM friends WHERE senderId = ? AND receiverId = ?", senderId, receiverId)
+    local p1 = GetProfile(senderId)
+    local p2 = GetProfile(receiverId)
+    if p1 and p2 then
+        p1.friends.sent[receiverId] = nil
+        p2.friends.received[senderId] = nil
+    end
 end
 
 -- Helper function to remove a friendship (both directions)
 function RemoveFriend(userId1, userId2)
-    SQLWrite("DELETE FROM friends WHERE (senderId = ? AND receiverId = ?) OR (senderId = ? AND receiverId = ?)",
-        userId1, userId2, userId2, userId1)
+    -- SQLWrite("DELETE FROM friends WHERE (senderId = ? AND receiverId = ?) OR (senderId = ? AND receiverId = ?)",
+    --     userId1, userId2, userId2, userId1)
+    local p1 = GetProfile(userId1)
+    local p2 = GetProfile(userId2)
+    if p1 and p2 then
+        p1.friends.accepted[userId2] = nil
+        p2.friends.accepted[userId1] = nil
+    end
 end
 
 -- Helper function to get all friends of a user
 function GetUserFriends(userId)
-    local result = SQLRead([[
-        SELECT CASE
-            WHEN senderId = ? THEN receiverId
-            ELSE senderId
-        END AS friendId
-        FROM friends
-        WHERE (senderId = ? OR receiverId = ?) AND accepted = 1
-    ]], userId, userId, userId)
-    return result
+    -- local result = SQLRead([[
+    --     SELECT CASE
+    --         WHEN senderId = ? THEN receiverId
+    --         ELSE senderId
+    --     END AS friendId
+    --     FROM friends
+    --     WHERE (senderId = ? OR receiverId = ?) AND accepted = 1
+    -- ]], userId, userId, userId)
+    -- return result
+    local profile = GetProfile(userId)
+    if profile then
+        return profile.friends.accepted
+    end
+    return {}
 end
 
 -- Helper function to get pending friend requests received by a user
 function GetFriendRequestsReceived(userId)
-    local result = SQLRead("SELECT * FROM friends WHERE receiverId = ? AND accepted = 0", userId)
-    return result
+    -- local result = SQLRead("SELECT * FROM friends WHERE receiverId = ? AND accepted = 0", userId)
+    -- return result
+    local profile = GetProfile(userId)
+    if profile then
+        return profile.friends.received
+    end
+    return {}
 end
 
 -- Helper function to get pending friend requests sent by a user
 function GetFriendRequestsSent(userId)
-    local result = SQLRead("SELECT * FROM friends WHERE senderId = ? AND accepted = 0", userId)
-    return result
+    -- local result = SQLRead("SELECT * FROM friends WHERE senderId = ? AND accepted = 0", userId)
+    -- return result
+    local profile = GetProfile(userId)
+    if profile then
+        return profile.friends.sent
+    end
+    return {}
 end
 
 Handlers.add("Add-Friend", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
-    local receiverId = VarOrNil(msg.Tags.FriendId)
+    local receiverId = VarOrNil(msg.Tags["Friend-Id"])
 
     if ValidateCondition(not receiverId, msg, {
             Status = "400",
@@ -975,12 +1141,13 @@ Handlers.add("Add-Friend", function(msg)
             })
         })
     end
+    SyncProcessState()
 end)
 
 Handlers.add("Remove-Friend", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local friendId = VarOrNil(msg.Tags.FriendId)
+    local friendId = VarOrNil(msg.Tags["Friend-Id"])
 
     if ValidateCondition(not friendId, msg, {
             Status = "400",
@@ -1035,12 +1202,13 @@ Handlers.add("Remove-Friend", function(msg)
             message = "Friend removed successfully"
         })
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Accept-Friend", function(msg)
     local receiverId = msg.From
     receiverId = GetOriginalId(receiverId)
-    local senderId = VarOrNil(msg.Tags.FriendId)
+    local senderId = VarOrNil(msg.Tags["Friend-Id"])
 
     if ValidateCondition(not senderId, msg, {
             Status = "400",
@@ -1095,12 +1263,13 @@ Handlers.add("Accept-Friend", function(msg)
             message = "Friend request accepted - you are now friends"
         })
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Reject-Friend", function(msg)
     local receiverId = msg.From
     receiverId = GetOriginalId(receiverId)
-    local senderId = VarOrNil(msg.Tags.FriendId)
+    local senderId = VarOrNil(msg.Tags["Friend-Id"])
 
     if ValidateCondition(not senderId, msg, {
             Status = "400",
@@ -1148,6 +1317,7 @@ Handlers.add("Reject-Friend", function(msg)
     -- Reject the friend request
     RejectFriendRequest(senderId, receiverId)
 
+    SyncProcessState()
     msg.reply({
         Action = "Reject-Friend-Response",
         Status = "200",
@@ -1170,10 +1340,10 @@ end)
 Handlers.add("Send-DM", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
-    local friendId = VarOrNil(msg.Tags.FriendId)
+    local friendId = VarOrNil(msg.Tags["Friend-Id"])
     local content = VarOrNil(msg.Data) or ""
     local attachments = VarOrNil(msg.Tags.Attachments) or "[]"
-    local replyTo = VarOrNil(msg.Tags.ReplyTo)
+    local replyTo = VarOrNil(msg.Tags["Reply-To"])
 
     if ValidateCondition(not friendId, msg, {
             Status = "400",
@@ -1253,6 +1423,7 @@ Handlers.add("Send-DM", function(msg)
     msg.forward(friendProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
     msg.forward(senderProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
 
+    SyncProcessState()
     msg.reply({
         Action = "Send-DM-Response",
         Status = "200",
@@ -1263,8 +1434,8 @@ end)
 Handlers.add("Delete-DM", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
-    local messageId = VarOrNil(msg.Tags.MessageId)
-    local friendId = VarOrNil(msg.Tags.FriendId)
+    local messageId = VarOrNil(msg.Tags["Message-Id"])
+    local friendId = VarOrNil(msg.Tags["Friend-Id"])
 
     if ValidateCondition(not messageId, msg, {
             Status = "400",
@@ -1310,6 +1481,7 @@ Handlers.add("Delete-DM", function(msg)
     msg.forward(friendProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
 
 
+    SyncProcessState()
     msg.reply({
         Action = "Delete-DM-Response",
         Status = "200",
@@ -1320,8 +1492,8 @@ end)
 Handlers.add("Edit-DM", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
-    local messageId = VarOrNil(msg.Tags.MessageId)
-    local friendId = VarOrNil(msg.Tags.FriendId)
+    local messageId = VarOrNil(msg.Tags["Message-Id"])
+    local friendId = VarOrNil(msg.Tags["Friend-Id"])
     local content = VarOrNil(msg.Data)
 
     if ValidateCondition(not messageId, msg, {
@@ -1376,6 +1548,7 @@ Handlers.add("Edit-DM", function(msg)
     msg.forward(senderProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
     msg.forward(friendProfile.dmProcess, { ["X-Origin"] = senderId, ["X-Origin-Id"] = msg.Id })
 
+    SyncProcessState()
     msg.reply({
         Action = "Edit-DM-Response",
         Status = "200",
@@ -1386,41 +1559,52 @@ end)
 ----------------------------------------------------------------------------
 --- NOTIFICATIONS
 
-Handlers.add("Get-Notifications", function(msg)
-    local userId = VarOrNil(msg.Tags.UserId) or msg.From
-    userId = GetOriginalId(userId)
+-- Handlers.add("Get-Notifications", function(msg)
+--     local userId = VarOrNil(msg.Tags.UserId) or msg.From
+--     userId = GetOriginalId(userId)
 
-    local profile = GetProfile(userId)
-    if ValidateCondition(not profile, msg, {
-            Status = "404",
-            Data = json.encode({
-                error = "Profile not found"
-            })
-        }) then
-        return
-    end
+--     local profile = GetProfile(userId)
+--     if ValidateCondition(not profile, msg, {
+--             Status = "404",
+--             Data = json.encode({
+--                 error = "Profile not found"
+--             })
+--         }) then
+--         return
+--     end
 
-    local notifications = SQLRead("SELECT * FROM notifications WHERE forUserId = ? ORDER BY notificationId DESC", userId)
-    msg.reply({
-        Action = "Get-Notifications-Response",
-        Status = "200",
-        Data = json.encode(notifications)
-    })
-end)
+--     -- local notifications = SQLRead("SELECT * FROM notifications WHERE forUserId = ? ORDER BY notificationId DESC", userId)
+--     local notifications = profiles[userId].notifications
+--     msg.reply({
+--         Action = "Get-Notifications-Response",
+--         Status = "200",
+--         Data = json.encode(notifications)
+--     })
+-- end)
+
+-- Helper to get next incremental notification id for a user, regardless of sparse deletions
+local function GetNextNotificationId(forUserId)
+    local profile = GetProfile(forUserId)
+    if not profile then return 1 end
+    profile.nextNotificationId = tonumber(profile.nextNotificationId) or 1
+    local id = profile.nextNotificationId
+    profile.nextNotificationId = id + 1
+    return id
+end
 
 Handlers.add("Add-Notification", function(msg)
     local serverOrDmId = VarOrNil(msg.From)
-    local fromUserId = VarOrNil(msg.Tags.FromUserId)
-    local forUserId = VarOrNil(msg.Tags.ForUserId)
+    local fromUserId = VarOrNil(msg.Tags["From-User-Id"])
+    local forUserId = VarOrNil(msg.Tags["For-User-Id"])
     local timestamp = VarOrNil(msg.Timestamp)
     local source = VarOrNil(msg.Tags.Source) -- Server / DM
-    local messageTxId = VarOrNil(msg.Tags.MessageTxId)
+    local messageTxId = VarOrNil(msg.Tags["Message-Tx-Id"])
     -- if source = Server
-    local channelId = VarOrNil(msg.Tags.ChannelId)
-    local serverName = VarOrNil(msg.Tags.ServerName)
-    local channelName = VarOrNil(msg.Tags.ChannelName)
+    local channelId = VarOrNil(msg.Tags["Channel-Id"])
+    local serverName = VarOrNil(msg.Tags["Server-Name"])
+    local channelName = VarOrNil(msg.Tags["Channel-Name"])
     -- optionals
-    local authorName = VarOrNil(msg.Tags.AuthorName)
+    local authorName = VarOrNil(msg.Tags["Author-Name"])
 
     if source == "SERVER" then
         -- validate server exists
@@ -1457,7 +1641,7 @@ Handlers.add("Add-Notification", function(msg)
     if source == "DM" then
         -- validate dm process exists
         local recipient = GetProfile(forUserId)
-        if ValidateCondition(not recipient.dmProcess, msg, {
+        if ValidateCondition(not recipient or not recipient.dmProcess, msg, {
                 Status = "404",
                 Data = json.encode({
                     error = "Recipient does not have a dm process"
@@ -1470,7 +1654,7 @@ Handlers.add("Add-Notification", function(msg)
         if ValidateCondition(recipient.dmProcess ~= serverOrDmId, msg, {
                 Status = "400",
                 Data = json.encode({
-                    error = "Recipient's dm process does not belong to the correct server"
+                    error = "Recipient's dm process does not belong to the correct user"
                 })
             }) then
             return
@@ -1487,20 +1671,34 @@ Handlers.add("Add-Notification", function(msg)
         end
     end
 
-    local rows = SQLWrite(
-        "INSERT INTO notifications (serverOrDmId, fromUserId, forUserId, timestamp, source, channelId, serverName, channelName, authorName, messageTxId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        serverOrDmId, fromUserId, forUserId, timestamp, source, channelId, serverName, channelName, authorName,
-        messageTxId
-    )
-    if rows > 0 then
-        msg.reply({
-            Action = "Add-Notification-Response",
-            Status = "200",
-            Data = json.encode({
-                message = "Notification added"
-            })
+    -- local rows = SQLWrite(
+    --     "INSERT INTO notifications (serverOrDmId, fromUserId, forUserId, timestamp, source, channelId, serverName, channelName, authorName, messageTxId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    --     serverOrDmId, fromUserId, forUserId, timestamp, source, channelId, serverName, channelName, authorName,
+    --     messageTxId
+    -- )
+    profiles[forUserId].notifications = profiles[forUserId].notifications or {}
+    local notificationId = GetNextNotificationId(forUserId)
+    profiles[forUserId].notifications[notificationId] = {
+        serverOrDmId = serverOrDmId,
+        fromUserId = fromUserId,
+        forUserId = forUserId,
+        timestamp = timestamp,
+        source = source,
+        channelId = channelId,
+        serverName = serverName,
+        channelName = channelName,
+        authorName = authorName,
+        messageTxId = messageTxId,
+        notificationId = notificationId
+    }
+    msg.reply({
+        Action = "Add-Notification-Response",
+        Status = "200",
+        Data = json.encode({
+            message = "Notification added"
         })
-    end
+    })
+    SyncProcessState()
 end)
 
 Handlers.add("Mark-Read", function(msg)
@@ -1527,8 +1725,10 @@ Handlers.add("Mark-Read", function(msg)
         return
     end
 
-    local notification = SQLRead("SELECT * FROM notifications WHERE notificationId = ? AND forUserId = ?", notificationId,
-        userId)[1]
+    -- local notification = SQLRead("SELECT * FROM notifications WHERE notificationId = ? AND forUserId = ?", notificationId,
+    --     userId)[1]
+    profiles[userId].notifications = profiles[userId].notifications or {}
+    local notification = profiles[userId].notifications[notificationId]
     if ValidateCondition(not notification, msg, {
             Status = "404",
             Data = json.encode({
@@ -1539,13 +1739,15 @@ Handlers.add("Mark-Read", function(msg)
     end
 
     -- delete notification from notifications table
-    SQLWrite("DELETE FROM notifications WHERE notificationId = ? AND forUserId = ?", notificationId, userId)
+    -- SQLWrite("DELETE FROM notifications WHERE notificationId = ? AND forUserId = ?", notificationId, userId)
+    profiles[userId].notifications[notificationId] = nil
 
     msg.reply({
         Action = "Mark-Read-Response",
         Status = "200",
         Data = json.encode(profile)
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Mark-All-Read", function(msg)
@@ -1562,13 +1764,15 @@ Handlers.add("Mark-All-Read", function(msg)
         return
     end
 
-    SQLWrite("DELETE FROM notifications WHERE forUserId = ?", userId)
+    -- SQLWrite("DELETE FROM notifications WHERE forUserId = ?", userId)
+    profiles[userId].notifications = {}
 
     msg.reply({
         Action = "Mark-All-Read-Response",
         Status = "200",
         Data = json.encode(profile)
     })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
@@ -1578,6 +1782,10 @@ Handlers.add("Create-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
     local botProcess = VarOrNil(msg.Tags.BotProcess)
+    local publicBot = VarOrNil(msg.Tags.PublicBot)
+    publicBot = (publicBot == "true")
+    local botName = VarOrNil(msg.Tags.Name)
+    local botPfp = VarOrNil(msg.Tags.Pfp)
 
     if ValidateCondition(not botProcess or #botProcess ~= 43, msg, {
             Status = "400",
@@ -1606,36 +1814,24 @@ Handlers.add("Create-Bot", function(msg)
     --     publicBot = true
     -- end
 
-    -- verify if bot process is for the correct owner
-    ao.send({
-        Target = botProcess,
-        Action = "Info",
-    })
 
-    local infoRes = Receive({ Action = "Info-Response", From = botProcess })
-    if ValidateCondition(infoRes.Status ~= "200" or infoRes.Tags.Owner_ ~= userId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Invalid bot process or owner mismatch"
-            })
-        })
-    then
-        return
-    end
-
-    local publicBot = infoRes.Tags.PublicBot
-    PublicBot = (publicBot == "true")
-    local botName = infoRes.Tags.Name
-    local botPfp = infoRes.Tags.Pfp
-
-    SQLWrite("INSERT INTO bots (userId, botProcess, botName, botPfp, botPublic) VALUES (?, ?, ?, ?, ?)", userId,
-        botProcess, botName, botPfp, publicBot)
+    -- SQLWrite("INSERT INTO bots (userId, botProcess, botName, botPfp, botPublic) VALUES (?, ?, ?, ?, ?)", userId,
+    --     botProcess, botName, botPfp, publicBot)
+    bots[botProcess] = {
+        userId = userId,
+        botProcess = botProcess,
+        botName = botName,
+        botPfp = botPfp,
+        botPublic = publicBot,
+        servers = {}
+    }
 
     msg.reply({
         Action = "Create-Bot-Response",
         Status = "200",
         BotProcess = botProcess
     })
+    SyncProcessState()
 end)
 
 Handlers.add("Update-Bot", function(msg)
@@ -1667,7 +1863,8 @@ Handlers.add("Update-Bot", function(msg)
     end
 
     -- Check if bot exists and user is the owner
-    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botId)[1]
+    -- local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botId)[1]
+    local bot = bots[botId]
     if ValidateCondition(not bot, msg, {
             Status = "404",
             Data = json.encode({
@@ -1714,54 +1911,60 @@ Handlers.add("Update-Bot", function(msg)
     end
 
     -- update bot in bots table
-    SQLWrite("UPDATE bots SET botPublic = ?, botName = ?, botPfp = ? WHERE botProcess = ?", publicBot, name, pfp, botId)
+    -- SQLWrite("UPDATE bots SET botPublic = ?, botName = ?, botPfp = ? WHERE botProcess = ?", publicBot, name, pfp, botId)
+    bots[botId].botPublic = publicBot or bots[botId].botPublic
+    bots[botId].botName = name or bots[botId].botName
+    bots[botId].botPfp = pfp or bots[botId].botPfp
 
     msg.reply({
         Action = "Update-Bot-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
-Handlers.add("Bot-Info", function(msg)
-    local botProcess = VarOrNil(msg.Tags.BotProcess)
+-- Handlers.add("Bot-Info", function(msg)
+--     local botProcess = VarOrNil(msg.Tags.BotProcess)
 
-    if ValidateCondition(not botProcess, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "BotProcess is required"
-            })
-        })
-    then
-        return
-    end
+--     if ValidateCondition(not botProcess, msg, {
+--             Status = "400",
+--             Data = json.encode({
+--                 error = "BotProcess is required"
+--             })
+--         })
+--     then
+--         return
+--     end
 
-    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
-    if ValidateCondition(not bot, msg, {
-            Status = "404",
-            Data = json.encode({
-                error = "Bot not found"
-            })
-        })
-    then
-        return
-    end
+--     -- local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+--     local bot = bots[botProcess]
+--     if ValidateCondition(not bot, msg, {
+--             Status = "404",
+--             Data = json.encode({
+--                 error = "Bot not found"
+--             })
+--         })
+--     then
+--         return
+--     end
 
-    -- fetch number of servers the bot is in
-    local totalServers = SQLRead("SELECT COUNT(*) FROM serversJoined WHERE botProcess = ?", botProcess)[1]
-    bot.totalServers = totalServers
+--     -- fetch number of servers the bot is in
+--     -- local totalServers = SQLRead("SELECT COUNT(*) FROM serversJoined WHERE botProcess = ?", botProcess)[1]
+--     local totalServers = #bot.servers
+--     bot.totalServers = totalServers
 
-    msg.reply({
-        Action = "Bot-Info-Response",
-        Status = "200",
-        Data = json.encode(bot)
-    })
-end)
+--     msg.reply({
+--         Action = "Bot-Info-Response",
+--         Status = "200",
+--         Data = json.encode(bot)
+--     })
+-- end)
 
 Handlers.add("Add-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
     local botProcess = VarOrNil(msg.Tags.BotProcess)
-    local serverId = VarOrNil(msg.Tags.ServerId)
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
 
     if ValidateCondition(not botProcess, msg, {
             Status = "400",
@@ -1804,7 +2007,8 @@ Handlers.add("Add-Bot", function(msg)
         return
     end
 
-    local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    -- local bot = SQLRead("SELECT * FROM bots WHERE botProcess = ?", botProcess)[1]
+    local bot = bots[botProcess]
     if ValidateCondition(not bot, msg, {
             Status = "404",
             Data = json.encode({
@@ -1847,7 +2051,8 @@ Handlers.add("Add-Bot", function(msg)
     end
 
     -- add bot to serversJoined table
-    SQLWrite("INSERT INTO botServers (botProcess, serverId) VALUES (?, ?)", botProcess, serverId)
+    -- SQLWrite("INSERT INTO botServers (botProcess, serverId) VALUES (?, ?)", botProcess, serverId)
+    bot.servers[serverId] = true
     ao.send({
         Target = serverId,
         Action = "Approve-Add-Bot",
@@ -1863,6 +2068,7 @@ Handlers.add("Add-Bot", function(msg)
         return
     end
 
+    SyncProcessState()
     ao.send({
         Target = botProcess,
         Status = "200",
@@ -1885,7 +2091,10 @@ Handlers.add("Remove-Bot", function(msg)
     end
 
     -- remove bot from serversJoined table
-    SQLWrite("DELETE FROM botServers WHERE botProcess = ? AND serverId = ?", botProcess, serverId)
+    -- SQLWrite("DELETE FROM botServers WHERE botProcess = ? AND serverId = ?", botProcess, serverId)
+    bots[botProcess].servers[serverId] = nil
+
+    SyncProcessState()
 
     msg.reply({
         Action = "Remove-Bot-Response",

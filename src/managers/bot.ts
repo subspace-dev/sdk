@@ -69,7 +69,7 @@ export class BotManager {
         return loggedAction('➕ adding bot to server', params, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.AddBot },
-                { name: "BotId", value: params.botId }
+                { name: "Bot-Id", value: params.botId }
             ];
 
             if (params.permissions) {
@@ -92,7 +92,7 @@ export class BotManager {
                 processId: params.serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.RemoveBot },
-                    { name: "BotId", value: params.botId }
+                    { name: "Bot-Id", value: params.botId }
                 ]
             });
 
@@ -107,8 +107,8 @@ export class BotManager {
                 processId: params.serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.Subscribe },
-                    { name: "BotId", value: params.botId },
-                    { name: "ChannelId", value: params.channelId }
+                    { name: "Bot-Id", value: params.botId },
+                    { name: "Channel-Id", value: params.channelId }
                 ]
             });
 
@@ -136,7 +136,7 @@ export class BotManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: Constants.Actions.AnchorToBot },
-                    { name: "AnchorId", value: anchorId }
+                    { name: "Anchor-Id", value: anchorId }
                 ]
             });
 

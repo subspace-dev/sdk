@@ -1,52 +1,22 @@
-sqlite3 = require("lsqlite3")
 json = require("json")
 
 ----------------------------------------------------------------------------
 --- VARIABLES
 
-Subspace = "H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY"
+Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
 Name = Name or "{NAME}"
 Pfp = Pfp or "{PFP}"
 PublicBot = PublicBot or ("{PUBLIC}" == "true")
 Version = Version or "1.0.0"
 
-JoinedServers = {}
-SubscribedServers = {}
+JoinedServers = JoinedServers or {}         -- { [serverId:string] = true }
+SubscribedServers = SubscribedServers or {} -- { [serverId:string] = true }
 
 ----------------------------------------------------------------------------
 
-db = db or sqlite3.open_memory()
+-- Switched from sqlite to in-memory Lua tables
 
--- easily read from the database
-function SQLRead(query, ...)
-    local m = {}
-    local _ = 1
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        for row in stmt:nrows() do
-            -- table.insert(m, row)
-            m[_] = row
-            _ = _ + 1
-        end
-        stmt:finalize()
-    end
-    return m
-end
-
--- easily write to the database
-function SQLWrite(query, ...)
-    local stmt = db:prepare(query)
-    if stmt then
-        local bind_res = stmt:bind_values(...)
-        assert(bind_res, "❌[bind error] " .. db:errmsg())
-        local step = stmt:step()
-        assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
-        stmt:finalize()
-    end
-    return db:changes()
-end
+-- No SQL helpers needed
 
 function VarOrNil(var)
     return var ~= "" and var or nil
@@ -70,24 +40,10 @@ end
 
 ----------------------------------------------------------------------------
 
-Handlers.add("Info", function(msg)
-    msg.reply({
-        Action = "Info-Response",
-        Status = "200",
-        Version = Version,
-        Owner_ = Owner,
-        PublicBot = tostring(PublicBot),
-        Name = Name,
-        Pfp = Pfp,
-        JoinedServers = json.encode(JoinedServers),
-        SubscribedServers = json.encode(SubscribedServers),
-    })
-end)
-
 Handlers.add("Update-Bot", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to update the bot")
 
-    local publicBot = VarOrNil(msg.Tags.PublicBot)
+    local publicBot = VarOrNil(msg.Tags["Public-Bot"])
     if publicBot then
         publicBot = (publicBot == "true")
     end
@@ -95,7 +51,10 @@ Handlers.add("Update-Bot", function(msg)
     local name = VarOrNil(msg.Tags.Name)
     local pfp = VarOrNil(msg.Tags.Pfp)
 
-    SQLWrite("UPDATE bots SET botPublic = ?, botName = ?, botPfp = ? WHERE userId = ?", publicBot, name, pfp, Owner)
+    -- Update the in-memory bot metadata
+    if publicBot ~= nil then PublicBot = publicBot end
+    if name then Name = name end
+    if pfp then Pfp = pfp end
 
     msg.reply({
         Action = "Update-Bot-Response",
@@ -105,10 +64,30 @@ end)
 
 ----------------------------------------------------------------------------
 
+function SyncProcessState()
+    local state = {
+        version = tostring(Version),
+        owner = Owner,
+        name = Name,
+        pfp = Pfp,
+        publicBot = PublicBot,
+        joinedServers = JoinedServers,
+        subscribedServers = SubscribedServers,
+    }
+
+    Send({
+        Target = ao.id,
+        device = "patch@1.0",
+        cache = { bot = state }
+    })
+end
+
+----------------------------------------------------------------------------
+
 Handlers.add("Join-Server", function(msg)
     assert(msg.From == Subspace, "You are not allowed to join servers")
 
-    local serverId = VarOrNil(msg.Tags.ServerId)
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
 
     if ValidateCondition(not serverId, msg, {
             Status = "400",
@@ -132,7 +111,7 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    JoinedServers[serverId] = true
+    JoinedServers[tostring(serverId)] = true
 
     -- send subscription messages
     ao.send({
@@ -147,20 +126,22 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    SubscribedServers[serverId] = true
+    SubscribedServers[tostring(serverId)] = true
+    SyncProcessState()
 end)
 
 Handlers.add("Remove-Bot", function(msg)
     local serverId = msg.From
 
-    JoinedServers[serverId] = nil
-    SubscribedServers[serverId] = nil
+    JoinedServers[tostring(serverId)] = nil
+    SubscribedServers[tostring(serverId)] = nil
 
     -- send unsubscription messages
     ao.send({
         Target = serverId,
         Action = "Unsubscribe",
     })
+    SyncProcessState()
 end)
 
 
