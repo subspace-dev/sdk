@@ -112,6 +112,44 @@ MemberCount = MemberCount or 0
 -- additional tables for easier lookup, minimize searching
 role_member_mapping = role_member_mapping or {} -- {roleId = {memberId=true, memberId=true, ...}}
 
+-- Helper functions to keep role_member_mapping in sync
+local function AddUserToRoleMapping(roleId, userId)
+    roleId = tostring(roleId)
+    if not role_member_mapping[roleId] then
+        role_member_mapping[roleId] = {}
+    end
+    role_member_mapping[roleId][userId] = true
+end
+
+local function RemoveUserFromRoleMapping(roleId, userId)
+    roleId = tostring(roleId)
+    local map = role_member_mapping[roleId]
+    if map then
+        map[userId] = nil
+        if next(map) == nil then
+            role_member_mapping[roleId] = nil
+        end
+    end
+end
+
+local function RemoveUserFromAllRoleMappings(userId, rolesList)
+    if rolesList and type(rolesList) == "table" then
+        for _, rid in ipairs(rolesList) do
+            RemoveUserFromRoleMapping(rid, userId)
+        end
+        return
+    end
+    -- Fallback if roles list is unavailable
+    for rid, map in pairs(role_member_mapping) do
+        if map then
+            map[userId] = nil
+            if next(map) == nil then
+                role_member_mapping[rid] = nil
+            end
+        end
+    end
+end
+
 -- db:exec([[
 --     CREATE TABLE IF NOT EXISTS categories (
 --         categoryId INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -409,11 +447,26 @@ function EnsureAllMembersHaveDefaultRole()
             local newRoles = { "1" }
             for _, rid in ipairs(existing) do table.insert(newRoles, rid) end
             member.roles = newRoles
+            -- reflect in mapping
+            AddUserToRoleMapping("1", memberId)
             membersUpdated = membersUpdated + 1
         end
     end
 
     return membersUpdated
+end
+
+-- Rebuild role_member_mapping based on current members' roles
+local function RebuildRoleMemberMapping()
+    role_member_mapping = {}
+    for memberId, member in pairs(members) do
+        local list = member and member.roles or {}
+        if list then
+            for _, rid in ipairs(list) do
+                AddUserToRoleMapping(rid, memberId)
+            end
+        end
+    end
 end
 
 -- Check if a member can send messages in a specific channel
@@ -591,6 +644,7 @@ function SyncProcessState()
             subscribedBots = SubscribedBots,
         },
         members = members,
+        roleMemberMapping = role_member_mapping,
         messages = messages,
         events = events,
     }
@@ -643,6 +697,8 @@ Handlers.add("Join-Server", function(msg)
         roles = { "1" } -- default role
     }
     members[userId] = member
+    -- update role mapping for default role
+    AddUserToRoleMapping("1", userId)
     -- Increment member counter
     MemberCount = MemberCount + 1
 
@@ -676,6 +732,8 @@ Handlers.add("Leave-Server", function(msg)
         return
     end
 
+    -- remove user from role mapping
+    RemoveUserFromAllRoleMappings(userId, members[userId] and members[userId].roles)
     members[userId] = nil
     -- Decrement member counter
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
@@ -1257,6 +1315,9 @@ Handlers.add("Create-Role", function(msg)
         orderId = new_orderId
     }
 
+    -- initialize empty mapping bucket for the new role for consistency
+    role_member_mapping[roleId] = role_member_mapping[roleId] or {}
+
     -- Resequence to ensure clean ordering
     ResequenceRoles()
 
@@ -1396,7 +1457,7 @@ Handlers.add("Delete-Role", function(msg)
     end
 
     -- Prevent deletion of default role (roleId 1)
-    if ValidateCondition(roleId == 1, msg, {
+    if ValidateCondition(tostring(roleId) == "1", msg, {
             Status = "400",
             Data = json.encode({
                 error = "Cannot delete the default role"
@@ -1417,6 +1478,7 @@ Handlers.add("Delete-Role", function(msg)
             member.roles = newRoles
         end
     end
+    -- clear mapping for this role
     role_member_mapping[roleId] = nil
 
     -- for _, member in pairs(members) do
@@ -1576,6 +1638,8 @@ Handlers.add("Kick-Member", function(msg)
     end
 
 
+    -- cleanup role mapping for the user
+    RemoveUserFromAllRoleMappings(targetUserId, members[targetUserId] and members[targetUserId].roles)
     members[targetUserId] = nil
     -- Decrement member counter for removed member
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
@@ -1637,6 +1701,8 @@ Handlers.add("Ban-Member", function(msg)
         return
     end
 
+    -- cleanup role mapping for the user
+    RemoveUserFromAllRoleMappings(targetUserId, members[targetUserId] and members[targetUserId].roles)
     members[targetUserId] = nil
     -- Decrement member counter for removed member
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
@@ -1785,6 +1851,8 @@ Handlers.add("Assign-Role", function(msg)
     -- Assign the role
     members[targetUserId].roles = members[targetUserId].roles or {}
     table.insert(members[targetUserId].roles, roleId)
+    -- Update mapping
+    AddUserToRoleMapping(roleId, targetUserId)
 
     msg.reply({
         Action = "Assign-Role-Response",
@@ -1798,7 +1866,7 @@ Handlers.add("Unassign-Role", function(msg)
     local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
     local roleId = VarOrNil(msg.Tags["Role-Id"])
 
-    if roleId then roleId = tonumber(roleId) end
+    if roleId then roleId = tostring(roleId) end
 
     local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
@@ -1831,7 +1899,7 @@ Handlers.add("Unassign-Role", function(msg)
     end
 
     -- Prevent removal of default role (roleId 1) from any member
-    if ValidateCondition(roleId == 1, msg, {
+    if ValidateCondition(tostring(roleId) == "1", msg, {
             Status = "400",
             Data = json.encode({
                 error = "Cannot remove the default role from members. All members must have the default role."
@@ -1898,6 +1966,8 @@ Handlers.add("Unassign-Role", function(msg)
         if rid ~= roleId then table.insert(newRoles, rid) end
     end
     members[targetUserId].roles = newRoles
+    -- Update mapping
+    RemoveUserFromRoleMapping(roleId, targetUserId)
 
     msg.reply({
         Action = "Unassign-Role-Response",
@@ -2198,6 +2268,8 @@ ValidateExistingRolePermissions()
 
 -- Ensure all existing members have the default role
 EnsureAllMembersHaveDefaultRole()
+-- Ensure mapping is consistent at startup
+RebuildRoleMemberMapping()
 
 -- Initialize MemberCount once at startup based on current state
 local function InitializeMemberCount()

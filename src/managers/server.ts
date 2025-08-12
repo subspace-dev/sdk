@@ -16,6 +16,7 @@ export interface Server {
     categories: Record<string, Category>;
     // roles: Role[];
     roles: Record<string, Role>; // roleId -> role
+    roleMemberMapping?: Record<string, Record<string, boolean>>; // roleId -> { userId: true }
     createdAt?: number;
 }
 
@@ -161,10 +162,20 @@ export class ServerManager {
         return loggedAction('🔍 getting server', { serverId }, async () => {
             // Prefer reading patched state from forward.computer cache
             let info: any | null = null;
+            let mappingTopLevel: Record<string, Record<string, boolean>> = {};
             try {
                 info = await ConnectionManager.hashpathGET<any>(`${serverId}~process@1.0/now/cache/server/serverinfo/~json@1.0/serialize`)
             } catch (_) {
                 info = null;
+            }
+            // Fetch roleMemberMapping from top-level cache path if available
+            try {
+                const mapping = await ConnectionManager.hashpathGET<Record<string, Record<string, boolean>>>(`${serverId}~process@1.0/now/cache/server/roleMemberMapping/~json@1.0/serialize`);
+                if (mapping && typeof mapping === 'object') {
+                    mappingTopLevel = mapping;
+                }
+            } catch (_) {
+                // ignore if not present
             }
             if (info) {
                 const rolesMap: Record<string, Role> = (Array.isArray(info.roles) ? info.roles : Object.values(info.roles || {})).reduce(
@@ -212,6 +223,7 @@ export class ServerManager {
                     channels: channelsMap,
                     categories: categoriesMap,
                     roles: rolesMap,
+                    roleMemberMapping: mappingTopLevel || info.roleMemberMapping || {},
                     createdAt: undefined
                 };
                 return server;
