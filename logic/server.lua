@@ -1,4 +1,3 @@
--- sqlite3 = require("lsqlite3")
 json = require("json")
 
 ----------------------------------------------------------------------------
@@ -14,51 +13,25 @@ Denomination = Denomination or 10
 Ticker = Ticker or "{TICKER}"
 Version_ = Version_ or "1.0.0" -- Version is already a built in function
 
--- By default servers are public and anyone can join
--- If private, new users cannot join
--- Get requests can still be done and non members can still see and fetch messages
+-- Server visibility policy:
+-- - Public by default: anyone can join
+-- - If private, join requests must be approved by server-side logic (not implemented here)
+-- - Reads can still be permitted by external cache depending on consumer policy
 PublicServer = PublicServer or true
 
--- db = db or sqlite3.open_memory()
+-- in-memory storage only
 
 ----------------------------------------------------------------------------
 
--- easily read from the database
--- function SQLRead(query, ...)
---     local m = {}
---     local _ = 1
---     local stmt = db:prepare(query)
---     if stmt then
---         local bind_res = stmt:bind_values(...)
---         assert(bind_res, "❌[bind error] " .. db:errmsg())
---         for row in stmt:nrows() do
---             -- table.insert(m, row)
---             m[_] = row
---             _ = _ + 1
---         end
---         stmt:finalize()
---     end
---     return m
--- end
+-- legacy sqlite helpers removed
 
--- -- easily write to the database
--- function SQLWrite(query, ...)
---     local stmt = db:prepare(query)
---     if stmt then
---         local bind_res = stmt:bind_values(...)
---         assert(bind_res, "❌[bind error] " .. db:errmsg())
---         local step = stmt:step()
---         assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
---         stmt:finalize()
---     end
---     return db:changes()
--- end
-
+-- Return nil for empty-string inputs so that tag lookups can be optional
 function VarOrNil(var)
     return var ~= "" and var or nil
 end
 
--- Validate that a condition is false, send error response if true
+-- Guard helper: if 'condition' is true, immediately reply with an error envelope
+-- and return true to signal that the caller should stop further processing
 function ValidateCondition(condition, msg, body)
     if condition then
         body = body or {}
@@ -75,6 +48,7 @@ function ValidateCondition(condition, msg, body)
 end
 
 ----------------------------------------------------------------------------
+-- Bootstrap defaults so a fresh server starts usable
 local categories_default = {
     ["1"] = {
         name = "Welcome",
@@ -109,10 +83,10 @@ events = events or {}
 bots = bots or {}
 MemberCount = MemberCount or 0
 
--- additional tables for easier lookup, minimize searching
+-- Fast lookup: roleId => set(userId)
 role_member_mapping = role_member_mapping or {} -- {roleId = {memberId=true, memberId=true, ...}}
 
--- Helper functions to keep role_member_mapping in sync
+-- Keep role_member_mapping in sync
 local function AddUserToRoleMapping(roleId, userId)
     roleId = tostring(roleId)
     if not role_member_mapping[roleId] then
@@ -150,94 +124,9 @@ local function RemoveUserFromAllRoleMappings(userId, rolesList)
     end
 end
 
--- db:exec([[
---     CREATE TABLE IF NOT EXISTS categories (
---         categoryId INTEGER PRIMARY KEY AUTOINCREMENT,
---         name TEXT NOT NULL,
---         orderId INTEGER NOT NULL DEFAULT 1,
---         allowMessaging INTEGER NOT NULL DEFAULT 1,
---         allowAttachments INTEGER NOT NULL DEFAULT 1
---     );
+-- legacy sqlite schema removed
 
---     CREATE TABLE IF NOT EXISTS channels (
---         channelId INTEGER PRIMARY KEY AUTOINCREMENT,
---         name TEXT NOT NULL,
---         orderId INTEGER NOT NULL DEFAULT 1,
---         categoryId INTEGER,
---         allowMessaging INTEGER DEFAULT NULL,
---         allowAttachments INTEGER DEFAULT NULL,
---         FOREIGN KEY (categoryId) REFERENCES categories(categoryId) ON DELETE SET NULL
---     );
-
---     CREATE TABLE IF NOT EXISTS members (
---         userId TEXT PRIMARY KEY,
---         nickname TEXT,
---         joinedAt INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
---     );
-
---     CREATE TABLE IF NOT EXISTS memberRoles (
---         userId TEXT,
---         roleId INTEGER,
---         FOREIGN KEY (userId) REFERENCES members(userId) ON DELETE CASCADE,
---         FOREIGN KEY (roleId) REFERENCES roles(roleId) ON DELETE CASCADE
---     );
-
---     CREATE TABLE IF NOT EXISTS messages (
---         messageId INTEGER PRIMARY KEY AUTOINCREMENT,
---         content TEXT NOT NULL,
---         channelId INTEGER,
---         authorId TEXT,
---         messageTxId TEXT UNIQUE,
---         timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
---         edited INTEGER NOT NULL DEFAULT 0,
---         attachments TEXT DEFAULT "[]",
---         replyTo INTEGER,
---         FOREIGN KEY (channelId) REFERENCES channels(channelId) ON DELETE CASCADE,
---         FOREIGN KEY (authorId) REFERENCES members(userId) ON DELETE SET NULL,
---         FOREIGN KEY (replyTo) REFERENCES messages(messageId) ON DELETE SET NULL
---     );
-
---     CREATE TABLE IF NOT EXISTS roles (
---         roleId INTEGER PRIMARY KEY AUTOINCREMENT,
---         name TEXT NOT NULL,
---         orderId INTEGER NOT NULL DEFAULT 1,
---         color TEXT NOT NULL,
---         permissions INTEGER NOT NULL DEFAULT 0
---     );
-
---     CREATE TABLE IF NOT EXISTS events (
---         eventId INTEGER PRIMARY KEY AUTOINCREMENT,
---         eventType TEXT, CHECK (eventType IN ("DELETE_MESSAGE", "EDIT_MESSAGE")),
---         messageId INTEGER,
---         FOREIGN KEY (messageId) REFERENCES messages(messageId)
---     );
-
---     CREATE TABLE IF NOT EXISTS bots (
---         botProcess TEXT PRIMARY KEY,
---         botApproved INTEGER NOT NULL DEFAULT 0
---     );
--- ]])
-
--- create default category and channel if the tables are empty
--- Welcome
--- - General with Welcome as parent category
--- if SQLRead("SELECT COUNT(*) as catCount FROM categories")[1].catCount == 0 then
---     SQLWrite("INSERT INTO categories (name, orderId) VALUES (?, ?)", "Welcome", 1)
--- end
-
--- if SQLRead("SELECT COUNT(*) as chanCount FROM channels")[1].chanCount == 0 then
---     SQLWrite("INSERT INTO channels (name, orderId, categoryId) VALUES (?, ?, ?)",
---         "General", 1, 1)
--- end
-
--- create default role if no roles exist
--- The first role created will have roleId 1 and be the default role
--- DEFAULT ROLE POLICY:
--- - roleId 1 is always the default role that ALL members must have
--- - It cannot be deleted from the server
--- - It cannot be removed from any member
--- - It starts with SEND_MESSAGES permission by default, but can be updated by role managers
--- - All new members automatically get this role when joining
+-- legacy default DB bootstrap comments removed
 SubscribedBots = {}
 
 Permissions = {
@@ -280,6 +169,7 @@ Permissions = {
 --     return originalId
 -- end
 
+-- Return a copy of member with roles resolved to role objects (non-mutating)
 function GetMember(userId)
     -- Return a copy with roles resolved to role objects; do not mutate stored state
     local stored = members[userId]
@@ -308,6 +198,8 @@ function RoleHasPermission(role, permission)
     return role.permissions & permission == permission
 end
 
+-- Resolve member’s effective permissions across all roles.
+-- ADMINISTRATOR or server Owner short-circuit to true.
 function MemberHasPermission(member, permission)
     -- return true if the member has the permission, false otherwise
     -- analyze member.roles to find out what permissions the member has
@@ -342,6 +234,7 @@ function MemberHasPermission(member, permission)
     return HasSpecificPermission(totalPermissions, permission)
 end
 
+-- Validate that a permissions bitfield contains only known bits
 function PermissionIsValid(permission)
     -- validate: permission should be either one or many from Permissions table
 
@@ -369,6 +262,7 @@ function PermissionIsValid(permission)
 end
 
 -- Get all individual permissions from a combined permission value
+-- Expand a bitfield into individual permission names
 function GetPermissionNames(permissions)
     local permissionNames = {}
 
@@ -386,6 +280,7 @@ function GetPermissionNames(permissions)
 end
 
 -- Combine multiple permission values safely
+-- Combine multiple permission values safely
 function CombinePermissions(...)
     local combined = 0
     local permissions = { ... }
@@ -400,6 +295,7 @@ function CombinePermissions(...)
 end
 
 -- Check if a permission value has a specific permission
+-- Check if a bitfield contains a specific permission
 function HasSpecificPermission(permissions, specificPermission)
     if not PermissionIsValid(permissions) or not PermissionIsValid(specificPermission) then
         return false
@@ -409,6 +305,7 @@ function HasSpecificPermission(permissions, specificPermission)
 end
 
 -- Get the default role for the server (roleId 1 is always the default role)
+-- Retrieve the default role (roleId 1)
 function GetDefaultRole()
     -- Prefer role with key "1"
     if roles["1"] then return roles["1"] end
@@ -425,6 +322,7 @@ end
 
 -- Ensure all members have the default role (roleId 1)
 -- This function can be called to fix any inconsistencies
+-- Ensure every member has the default role (repair tool)
 function EnsureAllMembersHaveDefaultRole()
     local defaultRole = GetDefaultRole()
     if not defaultRole then
@@ -457,6 +355,7 @@ function EnsureAllMembersHaveDefaultRole()
 end
 
 -- Rebuild role_member_mapping based on current members' roles
+-- Rebuild role_member_mapping from scratch
 local function RebuildRoleMemberMapping()
     role_member_mapping = {}
     for memberId, member in pairs(members) do
@@ -470,6 +369,7 @@ local function RebuildRoleMemberMapping()
 end
 
 -- Check if a member can send messages in a specific channel
+-- Policy for who can post in a given channel considering channel overrides
 function CanMemberSendMessagesInChannel(member, channel)
     if not member or not channel then
         return false
@@ -497,61 +397,65 @@ function CanMemberSendMessagesInChannel(member, channel)
 end
 
 -- Helper function to resequence channels within a specific category or uncategorized channels
+-- Recompute orderId sequence for channels in a bucket (categoryId or uncategorized)
 function ResequenceChannels(categoryId)
-    -- if categoryId ~= nil then
-    --     channels = SQLRead([[
-    --         SELECT channelId FROM channels
-    --         WHERE categoryId = ?
-    --         ORDER BY orderId ASC
-    --     ]], categoryId)
-    -- else
-    --     channels = SQLRead([[
-    --         SELECT channelId FROM channels
-    --         WHERE categoryId IS NULL
-    --         ORDER BY orderId ASC
-    --     ]])
-    -- end
-
-    -- Resequence starting from 1
-    for i, channel in ipairs(channels) do
-        -- if categoryId ~= nil then
-        --     SQLWrite([[
-        --         UPDATE channels SET orderId = ?
-        --         WHERE channelId = ? AND categoryId = ?
-        --     ]], i, channel.channelId, categoryId)
-        -- else
-        --     SQLWrite([[
-        --         UPDATE channels SET orderId = ?
-        --         WHERE channelId = ? AND categoryId IS NULL
-        --     ]], i, channel.channelId)
-        -- end
+    -- Build a working list for the target bucket
+    local list = {}
+    for _, ch in pairs(channels) do
         if categoryId ~= nil then
-            if channel.categoryId == categoryId then
-                channel.orderId = i
-            end
+            if ch and ch.categoryId == categoryId then table.insert(list, ch) end
         else
-            if channel.categoryId == nil then
-                channel.orderId = i
-            end
+            if ch and ch.categoryId == nil then table.insert(list, ch) end
         end
     end
 
-    return #channels
+    table.sort(list, function(a, b)
+        local ao = tonumber(a.orderId) or 0
+        local bo = tonumber(b.orderId) or 0
+        if ao == bo then
+            local ai = tonumber(a.channelId) or 0
+            local bi = tonumber(b.channelId) or 0
+            return ai < bi
+        end
+        return ao < bo
+    end)
+
+    for i, ch in ipairs(list) do
+        ch.orderId = i
+        channels[tostring(ch.channelId)] = ch
+    end
+
+    return #list
 end
 
 -- Helper function to resequence all categories
+-- Recompute orderId sequence for all categories
 function ResequenceCategories()
-    -- local categories = SQLRead("SELECT categoryId FROM categories ORDER BY orderId ASC")
+    local list = {}
+    for _, cat in pairs(categories) do
+        if cat then table.insert(list, cat) end
+    end
+    table.sort(list, function(a, b)
+        local ao = tonumber(a.orderId) or 0
+        local bo = tonumber(b.orderId) or 0
+        if ao == bo then
+            local ai = tonumber(a.categoryId) or 0
+            local bi = tonumber(b.categoryId) or 0
+            return ai < bi
+        end
+        return ao < bo
+    end)
 
-    -- Resequence starting from 1
-    for i, category in ipairs(categories) do
-        category.orderId = i
+    for i, cat in ipairs(list) do
+        cat.orderId = i
+        categories[tostring(cat.categoryId)] = cat
     end
 
-    return #categories
+    return #list
 end
 
 -- Helper function to resequence all roles
+-- Normalize role ordering; keeps roleId stable
 function ResequenceRoles()
     -- local roles = SQLRead("SELECT roleId FROM roles ORDER BY orderId ASC")
 
@@ -567,6 +471,7 @@ function ResequenceRoles()
     return #roles
 end
 
+-- Normalize ordering after category/channel mutations
 function ResequenceCategoriesAndChannels()
     -- This should be called when a category or channel is created or deleted
     -- It will resequence the orderId of the categories and channels
@@ -575,8 +480,10 @@ function ResequenceCategoriesAndChannels()
     ResequenceCategories()
 
     -- Then resequence channels within each category
-    for _, category in ipairs(categories) do
-        ResequenceChannels(category.categoryId)
+    for _, category in pairs(categories) do
+        if category then
+            ResequenceChannels(category.categoryId)
+        end
     end
 
     -- Finally resequence uncategorized channels
@@ -584,18 +491,24 @@ function ResequenceCategoriesAndChannels()
 end
 
 -- Ensure default ids for categories/channels at startup
+-- Ensure categoryId/channelId/orderId are populated for defaults
 local function EnsureEntityIds()
-    for i, category in ipairs(categories) do
-        if category.categoryId == nil then category.categoryId = tostring(i) end
-        if category.orderId == nil then category.orderId = i end
+    local ci = 0
+    for _, category in pairs(categories) do
+        ci = ci + 1
+        if category.categoryId == nil then category.categoryId = tostring(ci) end
+        if category.orderId == nil then category.orderId = ci end
     end
-    for i, channel in ipairs(channels) do
-        if channel.channelId == nil then channel.channelId = tostring(i) end
-        if channel.orderId == nil then channel.orderId = i end
+    local chi = 0
+    for _, channel in pairs(channels) do
+        chi = chi + 1
+        if channel.channelId == nil then channel.channelId = tostring(chi) end
+        if channel.orderId == nil then channel.orderId = chi end
     end
 end
 
 -- Robust channel resolver that works with both string and numeric keys
+-- Robust channel fetch by id (string key)
 function GetChannel(channelId)
     if not channelId then return nil end
     local idStr = tostring(channelId)
@@ -605,6 +518,7 @@ function GetChannel(channelId)
 end
 
 -- Robust category resolver similar to GetChannel
+-- Robust category fetch by id (string key)
 function GetCategory(categoryId)
     if not categoryId then return nil end
     local idStr = tostring(categoryId)
@@ -612,6 +526,7 @@ function GetCategory(categoryId)
     return category
 end
 
+-- Robust role fetch by id (string key)
 function GetRole(roleId)
     if not roleId then return nil end
     local idStr = tostring(roleId)
@@ -619,6 +534,45 @@ function GetRole(roleId)
     return role
 end
 
+-- Generate the next categoryId by scanning existing categories (works for map-style tables)
+-- Compute next category id by scanning existing keys
+local function GetNextCategoryId()
+    local maxId = 0
+    for key, cat in pairs(categories) do
+        local candidate = nil
+        if type(key) == "string" or type(key) == "number" then
+            candidate = tonumber(key)
+        end
+        if not candidate and cat and cat.categoryId then
+            candidate = tonumber(cat.categoryId)
+        end
+        if candidate and candidate > maxId then
+            maxId = candidate
+        end
+    end
+    return tostring(maxId + 1)
+end
+
+-- Generate the next channelId by scanning existing channels (works for map-style tables)
+-- Compute next channel id by scanning existing keys
+local function GetNextChannelId()
+    local maxId = 0
+    for key, ch in pairs(channels) do
+        local candidate = nil
+        if type(key) == "string" or type(key) == "number" then
+            candidate = tonumber(key)
+        end
+        if not candidate and ch and ch.channelId then
+            candidate = tonumber(ch.channelId)
+        end
+        if candidate and candidate > maxId then
+            maxId = candidate
+        end
+    end
+    return tostring(maxId + 1)
+end
+
+-- Push a snapshot of server state to Hyperbeam’s patch cache for fast reads
 function SyncProcessState()
     -- This function is used to take all the possible data and couple it into
     -- a single table which will be stored in Hyperbeams state for quick access.
@@ -658,6 +612,7 @@ function SyncProcessState()
 end
 
 -- make sure state is synced on startup
+-- Ensure initial cache is populated on first boot
 InitialSync = InitialSync or 'INCOMPLETE'
 if InitialSync == 'INCOMPLETE' then
     SyncProcessState()
@@ -666,6 +621,7 @@ end
 
 ----------------------------------------------------------------------------
 
+-- Add a new member to the server (public servers only)
 Handlers.add("Join-Server", function(msg)
     local userId = msg.From
     local joinedAt = msg.Timestamp or os.time()
@@ -709,6 +665,7 @@ Handlers.add("Join-Server", function(msg)
     SyncProcessState()
 end)
 
+-- Remove a member from the server (cannot remove the owner)
 Handlers.add("Leave-Server", function(msg)
     local userId = msg.From
 
@@ -744,6 +701,7 @@ Handlers.add("Leave-Server", function(msg)
     SyncProcessState()
 end)
 
+-- Update server metadata and publicity. MANAGE_SERVER required.
 Handlers.add("Update-Server", function(msg)
     local userId = msg.From
     local name = VarOrNil(msg.Tags.Name)
@@ -751,7 +709,16 @@ Handlers.add("Update-Server", function(msg)
     local description = VarOrNil(msg.Tags.Description)
     local publicServer = VarOrNil(msg.Tags["Public-Server"])
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_SERVER)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_SERVER)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -802,7 +769,16 @@ Handlers.add("Create-Category", function(msg)
     allowAttachments = tonumber(allowAttachments)
     if orderId then orderId = tonumber(orderId) end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -812,14 +788,16 @@ Handlers.add("Create-Category", function(msg)
         return
     end
 
+    -- Determine next categoryId using helper (categories is a map)
+    local categoryId = GetNextCategoryId()
     local newCategory = {
-        categoryId = tostring(#categories + 1),
+        categoryId = categoryId,
         name = name,
-        orderId = orderId or (#categories + 1),
+        orderId = tonumber(orderId) or tonumber(categoryId),
         allowMessaging = allowMessaging,
         allowAttachments = allowAttachments
     }
-    categories[#categories + 1] = newCategory
+    categories[categoryId] = newCategory
 
     msg.reply({
         Action = "Create-Category-Response",
@@ -836,11 +814,21 @@ Handlers.add("Update-Category", function(msg)
     local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"])
     local orderId = VarOrNil(msg.Tags["Order-Id"])
 
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
     if allowMessaging then allowMessaging = tonumber(allowMessaging) end
     if allowAttachments then allowAttachments = tonumber(allowAttachments) end
     if orderId then orderId = tonumber(orderId) end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -910,7 +898,17 @@ Handlers.add("Delete-Category", function(msg)
     local userId = msg.From
     local categoryId = VarOrNil(msg.Tags["Category-Id"])
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -969,7 +967,17 @@ Handlers.add("Create-Channel", function(msg)
     -- categoryId must be string storage key
     if categoryId then categoryId = tostring(categoryId) end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -992,11 +1000,12 @@ Handlers.add("Create-Channel", function(msg)
         end
     end
 
-    local channelId = #channels + 1
+    -- Determine next channelId using helper (channels is a map)
+    local channelId = GetNextChannelId()
     local newChannel = {
-        channelId = tostring(channelId),
+        channelId = channelId,
         name = name,
-        orderId = channelId, -- ensures the channel is at the end of the category
+        orderId = tonumber(orderId) or tonumber(channelId),
         categoryId = categoryId,
         allowMessaging = allowMessaging or 1,
         allowAttachments = allowAttachments or 1
@@ -1026,7 +1035,17 @@ Handlers.add("Update-Channel", function(msg)
     if allowAttachments then allowAttachments = tonumber(allowAttachments) end
     if orderId then orderId = tonumber(orderId) end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1187,7 +1206,17 @@ Handlers.add("Delete-Channel", function(msg)
     local userId = msg.From
     local channelId = VarOrNil(msg.Tags["Channel-Id"])
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_CHANNELS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1271,7 +1300,17 @@ Handlers.add("Create-Role", function(msg)
         return
     end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1359,7 +1398,17 @@ Handlers.add("Update-Role", function(msg)
         return
     end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1436,7 +1485,17 @@ Handlers.add("Delete-Role", function(msg)
         return
     end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1607,7 +1666,17 @@ Handlers.add("Kick-Member", function(msg)
     local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
     local reason = VarOrNil(msg.Tags.Reason)
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.KICK_MEMBERS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.KICK_MEMBERS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1668,7 +1737,17 @@ Handlers.add("Ban-Member", function(msg)
     local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
     local reason = VarOrNil(msg.Tags.Reason)
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.BAN_MEMBERS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.BAN_MEMBERS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1728,7 +1807,17 @@ Handlers.add("Unban-Member", function(msg)
     local userId = msg.From
     local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.BAN_MEMBERS)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.BAN_MEMBERS)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1766,7 +1855,17 @@ Handlers.add("Assign-Role", function(msg)
         return
     end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({
@@ -1868,7 +1967,17 @@ Handlers.add("Unassign-Role", function(msg)
 
     if roleId then roleId = tostring(roleId) end
 
-    local hasPermission = MemberHasPermission(GetMember(userId), Permissions.MANAGE_ROLES)
+    local member = GetMember(userId)
+    if ValidateCondition(not member, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "User not found"
+            })
+        }) then
+        return
+    end
+
+    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
     if ValidateCondition(not hasPermission, msg, {
             Status = "400",
             Data = json.encode({

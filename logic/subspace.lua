@@ -1,4 +1,4 @@
--- sqlite3 = require("lsqlite3")
+-- in-memory storage only
 json = require("json")
 
 ----------------------------------------------------------------------------
@@ -32,44 +32,14 @@ end)
 
 ----------------------------------------------------------------------------
 
--- db = db or sqlite3.open_memory()
-
--- easily read from the database
--- function SQLRead(query, ...)
---     local m = {}
---     local _ = 1
---     local stmt = db:prepare(query)
---     if stmt then
---         local bind_res = stmt:bind_values(...)
---         assert(bind_res, "❌[bind error] " .. db:errmsg())
---         for row in stmt:nrows() do
---             -- table.insert(m, row)
---             m[_] = row
---             _ = _ + 1
---         end
---         stmt:finalize()
---     end
---     return m
--- end
-
--- -- easily write to the database
--- function SQLWrite(query, ...)
---     local stmt = db:prepare(query)
---     if stmt then
---         local bind_res = stmt:bind_values(...)
---         assert(bind_res, "❌[bind error] " .. db:errmsg())
---         local step = stmt:step()
---         assert(step == sqlite3.DONE, "❌[write error] " .. db:errmsg())
---         stmt:finalize()
---     end
---     return db:changes()
--- end
+-- legacy sqlite helpers removed
 
 function VarOrNil(var)
     return var ~= "" and var or nil
 end
 
--- Validate that a condition is false, send error response if true
+-- Guard helper: if 'condition' is true, immediately reply with an error envelope
+-- and return true to signal that the caller should stop further processing
 function ValidateCondition(condition, msg, body)
     if condition then
         body = body or {}
@@ -210,6 +180,7 @@ function GetProfile(userId)
     return profile
 end
 
+-- Resolve the original user id for a possibly delegated id; validates delegation
 function GetOriginalId(delegationOrOriginalId)
     -- userId can either be the originalId or the delegatedId
     -- always return the originalId
@@ -251,6 +222,7 @@ function UserInServer(userId, serverId)
 end
 
 -- Helper function to resequence servers for a specific user
+-- Normalize server orderIds for a profile (1..n without gaps)
 function ResequenceUserServers(userId)
     local profile = GetProfile(userId)
     if not profile then
@@ -278,6 +250,7 @@ function ResequenceUserServers(userId)
 end
 
 -- Helper to compute next order id for serversJoined for a given profile
+-- Compute the next order id where a new server should appear for a profile
 local function GetNextServerOrderId(profile)
     if not profile or not profile.serversJoined then return 1 end
     local maxOrder = 0
@@ -290,6 +263,7 @@ end
 
 ----------------------------------------------------------------------------
 
+-- Push Subspace-wide state (profiles, servers, bots, notifications) to patch cache
 function SyncProcessState()
     -- This function is used to take all the possible data and couple it into
     -- a single table which will be stored in Hyperbeams state for quick access.
@@ -316,6 +290,7 @@ end
 ----------------------------------------------------------------------------
 --- PROFILES
 
+-- Create a profile with a unique DM process id
 Handlers.add("Create-Profile", function(msg)
     local userId = msg.From
     local dmProcess = VarOrNil(msg.Tags["Dm-Process"])
@@ -433,6 +408,7 @@ end)
 --     })
 -- end)
 
+-- Update profile fields; currently supports pfp
 Handlers.add("Update-Profile", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -502,6 +478,7 @@ end)
 ----------------------------------------------------------------------------
 --- SERVER
 
+-- Create a server record owned by the caller, and stage it in their joined list
 Handlers.add("Create-Server", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -557,6 +534,7 @@ Handlers.add("Create-Server", function(msg)
     })
 end)
 
+-- Update server visibility from the server process itself
 Handlers.add("Update-Server", function(msg)
     local serverId = msg.From
     local publicServer = (VarOrNil(msg.Tags["Public-Server"]) == "true") -- bool
@@ -594,6 +572,7 @@ end)
 
 -- users need to call this frist, before actually joining server
 -- To prevent any server from listing themself on the users profile
+-- User pre-approves a server join so servers cannot list themselves without consent
 Handlers.add("Approve-Join-Server", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -646,6 +625,7 @@ Handlers.add("Approve-Join-Server", function(msg)
 end)
 
 -- Handler for when a server notifies us that a user has joined
+-- Server confirms a user joined; flips serverApproved flag in profile
 Handlers.add("User-Joined-Server", function(msg)
     local serverId = msg.From
     local userId = VarOrNil(msg.Tags["User-Id"])
@@ -715,6 +695,7 @@ Handlers.add("User-Joined-Server", function(msg)
 end)
 
 -- Handler for when a server notifies us that a user has left
+-- Server confirms a user left; removes from profile and resequences order
 Handlers.add("User-Left-Server", function(msg)
     local serverId = msg.From
     local userId = VarOrNil(msg.Tags["User-Id"])
@@ -772,6 +753,7 @@ Handlers.add("User-Left-Server", function(msg)
     })
 end)
 
+-- Reorder a server in the user’s sidebar; maintains a contiguous sequence
 Handlers.add("Update-Server-Order", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -1051,6 +1033,7 @@ function GetFriendRequestsSent(userId)
     return {}
 end
 
+-- Send a friend request; auto-accept if a reverse pending exists
 Handlers.add("Add-Friend", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
@@ -1144,6 +1127,7 @@ Handlers.add("Add-Friend", function(msg)
     SyncProcessState()
 end)
 
+-- Remove an existing friendship
 Handlers.add("Remove-Friend", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -1205,6 +1189,7 @@ Handlers.add("Remove-Friend", function(msg)
     SyncProcessState()
 end)
 
+-- Accept a pending friend request
 Handlers.add("Accept-Friend", function(msg)
     local receiverId = msg.From
     receiverId = GetOriginalId(receiverId)
@@ -1266,6 +1251,7 @@ Handlers.add("Accept-Friend", function(msg)
     SyncProcessState()
 end)
 
+-- Reject a pending friend request
 Handlers.add("Reject-Friend", function(msg)
     local receiverId = msg.From
     receiverId = GetOriginalId(receiverId)
@@ -1337,6 +1323,7 @@ end)
 -- Profile -> B (X-Origin = A)
 
 -- Sending DMs only possible if they are friends
+-- Forward a DM to both sender and recipient DM processes after validations
 Handlers.add("Send-DM", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
@@ -1431,6 +1418,7 @@ Handlers.add("Send-DM", function(msg)
     })
 end)
 
+-- Forward a delete request to both DM processes
 Handlers.add("Delete-DM", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
@@ -1489,6 +1477,7 @@ Handlers.add("Delete-DM", function(msg)
     })
 end)
 
+-- Forward an edit request to both DM processes
 Handlers.add("Edit-DM", function(msg)
     local senderId = msg.From
     senderId = GetOriginalId(senderId)
@@ -1583,6 +1572,7 @@ end)
 -- end)
 
 -- Helper to get next incremental notification id for a user, regardless of sparse deletions
+-- Generate a per-user incremental notification id
 local function GetNextNotificationId(forUserId)
     local profile = GetProfile(forUserId)
     if not profile then return 1 end
@@ -1592,6 +1582,7 @@ local function GetNextNotificationId(forUserId)
     return id
 end
 
+-- Create a notification for a user (SERVER or DM source) after validations
 Handlers.add("Add-Notification", function(msg)
     local serverOrDmId = VarOrNil(msg.From)
     local fromUserId = VarOrNil(msg.Tags["From-User-Id"])
@@ -1701,6 +1692,7 @@ Handlers.add("Add-Notification", function(msg)
     SyncProcessState()
 end)
 
+-- Delete a single notification
 Handlers.add("Mark-Read", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -1750,6 +1742,7 @@ Handlers.add("Mark-Read", function(msg)
     SyncProcessState()
 end)
 
+-- Delete all notifications for a user
 Handlers.add("Mark-All-Read", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)

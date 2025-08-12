@@ -1,6 +1,20 @@
 json = require("json")
 
 ----------------------------------------------------------------------------
+-- Subspace Bot Logic
+--
+-- Purpose:
+-- - Maintain bot metadata (name, pfp, public visibility)
+-- - Join/leave servers when instructed by the Subspace coordinator
+-- - Track which servers the bot has joined/subscribed to
+-- - Relay/handle server-originated events (hook points for future logic)
+--
+-- Notes:
+-- - Storage is in-memory Lua tables to keep runtime simple and fast
+-- - External persistence and caching is handled by Hyperbeam via SyncProcessState
+----------------------------------------------------------------------------
+
+----------------------------------------------------------------------------
 --- VARIABLES
 
 Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
@@ -9,20 +23,21 @@ Pfp = Pfp or "{PFP}"
 PublicBot = PublicBot or ("{PUBLIC}" == "true")
 Version = Version or "1.0.0"
 
+-- Membership and subscriptions are tracked as presence maps keyed by server id
 JoinedServers = JoinedServers or {}         -- { [serverId:string] = true }
 SubscribedServers = SubscribedServers or {} -- { [serverId:string] = true }
 
 ----------------------------------------------------------------------------
 
--- Switched from sqlite to in-memory Lua tables
+-- Storage policy: in-memory tables only
 
--- No SQL helpers needed
-
+-- Return nil for empty-string inputs so that tag lookups can be optional
 function VarOrNil(var)
     return var ~= "" and var or nil
 end
 
--- Validate that a condition is false, send error response if true
+-- Guard helper: if 'condition' is true, immediately reply with an error envelope
+-- and return true to signal that the caller should stop further processing
 function ValidateCondition(condition, msg, body)
     if condition then
         body = body or {}
@@ -40,6 +55,7 @@ end
 
 ----------------------------------------------------------------------------
 
+-- Update bot’s public flag, name and pfp. Only Subspace can issue this.
 Handlers.add("Update-Bot", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to update the bot")
 
@@ -51,7 +67,7 @@ Handlers.add("Update-Bot", function(msg)
     local name = VarOrNil(msg.Tags.Name)
     local pfp = VarOrNil(msg.Tags.Pfp)
 
-    -- Update the in-memory bot metadata
+    -- Update in-memory bot metadata; omit fields that were not provided
     if publicBot ~= nil then PublicBot = publicBot end
     if name then Name = name end
     if pfp then Pfp = pfp end
@@ -64,6 +80,7 @@ end)
 
 ----------------------------------------------------------------------------
 
+-- Push current bot state to Hyperbeam’s patch cache for fast external reads
 function SyncProcessState()
     local state = {
         version = tostring(Version),
@@ -84,6 +101,7 @@ end
 
 ----------------------------------------------------------------------------
 
+-- Request to join a server and subscribe to its updates. Only Subspace can issue this.
 Handlers.add("Join-Server", function(msg)
     assert(msg.From == Subspace, "You are not allowed to join servers")
 
@@ -98,7 +116,7 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    -- can add checks here for blacklisted servers
+    -- Hook: black/allow list checks could be added here if needed
     msg.reply({
         Action = "Join-Server-Response",
         Status = "200",
@@ -113,7 +131,7 @@ Handlers.add("Join-Server", function(msg)
 
     JoinedServers[tostring(serverId)] = true
 
-    -- send subscription messages
+    -- Subscribe to server events after a successful join
     ao.send({
         Target = serverId,
         Action = "Subscribe",
@@ -130,6 +148,7 @@ Handlers.add("Join-Server", function(msg)
     SyncProcessState()
 end)
 
+-- Server has removed the bot: clean up local membership/subscription and unsubscribe
 Handlers.add("Remove-Bot", function(msg)
     local serverId = msg.From
 
@@ -147,7 +166,7 @@ end)
 
 ----------------------------------------------------------------------------
 
--- Events sent from servers
+-- Events sent from servers (hook points)
 
 Handlers.add("Event-Message", function(msg)
     local serverId = msg.From
@@ -170,6 +189,5 @@ Handlers.add("Event-Message", function(msg)
         return
     end
 
-    -- continue processing message
-    -- TODO
+    -- Hook: implement bot behavior in response to server messages here
 end)

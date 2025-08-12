@@ -225,6 +225,26 @@ export async function loggedAction<T>(
     } catch (error) {
         const duration = Date.now() - startTime;
         logger.actionError(action, error, duration);
+
+        // If this is an AO error augmented by the SDK, surface rich details inline
+        try {
+            const maybe: any = error;
+            if (maybe && maybe.ao) {
+                const ao = maybe.ao;
+                const summary: any = {
+                    error: ao?.Error ?? undefined,
+                    output: ao?.Output?.data ?? undefined,
+                };
+                if (Array.isArray(ao?.Messages) && ao.Messages.length > 0) {
+                    // Print only tags for readability
+                    summary.firstMessageTags = ao.Messages[0]?.Tags || ao.Messages[0];
+                }
+                console.log('%cAO Error Details', 'color:#F44336;font-weight:bold;');
+                console.log(summary);
+            }
+        } catch (_) {
+            // ignore logging errors
+        }
         throw error;
     }
 }

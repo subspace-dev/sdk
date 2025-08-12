@@ -104,6 +104,22 @@ export class ConnectionManager {
         );
     }
 
+    private static safeStringify(obj: any, maxLen: number = 2000): string {
+        try {
+            const str = JSON.stringify(obj, null, 2);
+            if (typeof str === 'string' && str.length > maxLen) {
+                return str.slice(0, maxLen) + '…';
+            }
+            return str;
+        } catch (_) {
+            try {
+                return String(obj);
+            } catch {
+                return '[Unserializable]';
+            }
+        }
+    }
+
     updateConfig(config: Partial<ConnectionConfig>) {
 
         if (config.CU_URL) this.cuUrl = config.CU_URL
@@ -256,7 +272,27 @@ export class ConnectionManager {
     parseOutput(res: MessageResult, { hasMatchingTag, hasMatchingTagValue }: { hasMatchingTag?: string, hasMatchingTagValue?: string } = {}) {
 
         if (res.Error) {
-            throw new Error(`AO Error: ${res.Error}`)
+            // Provide a much more informative error message than "[object Object]"
+            const base = typeof (res as any).Error === 'string'
+                ? (res as any).Error
+                : ConnectionManager.safeStringify((res as any).Error);
+
+            const extra: Record<string, any> = {};
+            if ((res as any).Output?.data) extra.output = (res as any).Output?.data;
+            if ((res as any).Messages && Array.isArray((res as any).Messages)) {
+                // Include only the first message's tags to avoid massive logs
+                const first = (res as any).Messages[0];
+                if (first?.Tags) extra.firstMessageTags = first.Tags;
+            }
+
+            const extraStr = Object.keys(extra).length
+                ? ` | Details: ${ConnectionManager.safeStringify(extra)}`
+                : '';
+
+            const err = new Error(`AO Error: ${base}${extraStr}`);
+            // Attach the full AO result for richer console inspection
+            (err as any).ao = res;
+            throw err;
         }
 
         if (res.Output && res.Output.data && !hasMatchingTag && !hasMatchingTagValue) {

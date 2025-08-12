@@ -1,22 +1,38 @@
 json = require("json")
 
 ----------------------------------------------------------------------------
+-- Direct Messages (DM) Process Logic
+--
+-- Purpose:
+-- - Store DM threads per counterpart user id
+-- - Provide CRUD for DM messages with simple event tracking
+-- - Expose a compact patch state for external consumers
+--
+-- Storage Model:
+-- - dm_messages[dmUserId][messageId] = message
+-- - messageId is a local, per-dmUserId incrementing integer
+-- - dm_events is a simple append-only list of edit/delete events
+----------------------------------------------------------------------------
+
+----------------------------------------------------------------------------
 --- VARIABLES
 
 Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
 Version = Version or "1.0.0"
 
--- Switched from sqlite to in-memory Lua tables
+-- Storage policy: in-memory tables only
 
 ----------------------------------------------------------------------------
 
--- No SQLRead/SQLWrite helpers needed anymore
+-- (no legacy persistence layer)
 
+-- Return nil for empty-string inputs so that tag lookups can be optional
 function VarOrNil(var)
     return var ~= "" and var or nil
 end
 
--- Validate that a condition is false, send error response if true
+-- Guard helper: if 'condition' is true, immediately reply with an error envelope
+-- and return true to signal that the caller should stop further processing
 function ValidateCondition(condition, msg, body)
     if condition then
         body = body or {}
@@ -40,12 +56,14 @@ dm_nextMessageId = dm_nextMessageId or {} -- { [dmUserId] = nextId:number }
 dm_events = dm_events or {}               -- array of { eventId, eventType, messageId }
 dm_nextEventId = dm_nextEventId or 1
 
+-- Allocate a new per-peer message id
 local function getNextMessageId(dmUserId)
     local nextId = tonumber(dm_nextMessageId[dmUserId]) or 1
     dm_nextMessageId[dmUserId] = nextId + 1
     return nextId
 end
 
+-- Record a mutation event for consumers that want incremental syncing
 local function appendEvent(eventType, messageId)
     local eid = dm_nextEventId
     dm_nextEventId = eid + 1
@@ -55,6 +73,7 @@ end
 
 ----------------------------------------------------------------------------
 
+-- Push current DM state to Hyperbeam’s patch cache for fast external reads
 function SyncProcessState()
     local state = {
         version = tostring(Version),
@@ -73,7 +92,7 @@ end
 ----------------------------------------------------------------------------
 
 
--- msg forwarded by Profiles
+-- Create a new DM message (forwarded via Profiles). Only Subspace can issue this.
 Handlers.add("Send-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to add a dm")
 
@@ -85,7 +104,7 @@ Handlers.add("Send-DM", function(msg)
     local timestamp = tonumber(msg.Timestamp)
     local messageTxId = msg["X-Origin-Id"]
 
-    -- Either authorId or dmUserId must be the Owner
+    -- Trust policy: Either authorId or dmUserId must be the Owner of this dm process
     if ValidateCondition(authorId ~= Owner and dmUserId ~= Owner, msg, {
             Status = "400",
             Data = json.encode({
@@ -113,7 +132,7 @@ Handlers.add("Send-DM", function(msg)
         return
     end
 
-    -- if dmUserId is the Owner, then authorId is the friendId
+    -- If the friendId points to this process owner, normalize to the other party
     if dmUserId == Owner then
         dmUserId = authorId
     end
@@ -131,7 +150,7 @@ Handlers.add("Send-DM", function(msg)
         end
     end
 
-    -- if replyTo is provided, it should be a number and a valid messageId in messages table
+    -- If replying: ensure the referenced message exists in the same peer bucket
     if replyTo then
         replyTo = tonumber(replyTo)
         local bucket = dm_messages[dmUserId] or {}
@@ -146,7 +165,7 @@ Handlers.add("Send-DM", function(msg)
         end
     end
 
-    -- insert message into in-memory table
+    -- Insert message into the per-peer bucket
     dm_messages[dmUserId] = dm_messages[dmUserId] or {}
     local messageId = getNextMessageId(dmUserId)
     dm_messages[dmUserId][tostring(messageId)] = {
@@ -161,7 +180,7 @@ Handlers.add("Send-DM", function(msg)
         messageTxId = messageTxId,
     }
 
-    -- send notification
+    -- Notify Subspace so the recipient can receive a notification out-of-band
     if authorId ~= Owner then
         ao.send({
             Target = Subspace,
@@ -186,6 +205,7 @@ Handlers.add("Send-DM", function(msg)
     })
 end)
 
+-- Delete a DM message authored by the caller
 Handlers.add("Delete-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to delete a dm")
 
@@ -233,7 +253,7 @@ Handlers.add("Delete-DM", function(msg)
         dmUserId = authorId
     end
 
-    -- fetch message from in-memory store
+    -- Fetch and author-validate message from the per-peer bucket
     messageId = tonumber(messageId)
     local bucket = dm_messages[dmUserId] or {}
     local message = bucket[tostring(messageId)]
@@ -247,7 +267,7 @@ Handlers.add("Delete-DM", function(msg)
         return
     end
 
-    -- delete message and record event
+    -- Delete message and record a DELETE event for incremental consumers
     dm_messages[dmUserId][tostring(messageId)] = nil
     appendEvent("DELETE_MESSAGE", messageId)
 
@@ -260,6 +280,7 @@ Handlers.add("Delete-DM", function(msg)
 end)
 
 
+-- Edit a DM message authored by the caller
 Handlers.add("Edit-DM", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to edit a dm")
 
@@ -317,7 +338,7 @@ Handlers.add("Edit-DM", function(msg)
         return
     end
 
-    -- fetch message from in-memory store
+    -- Fetch and author-validate message from the per-peer bucket
     messageId = tonumber(messageId)
     local bucket = dm_messages[dmUserId] or {}
     local message = bucket[tostring(messageId)]
@@ -331,7 +352,7 @@ Handlers.add("Edit-DM", function(msg)
         return
     end
 
-    -- update message and record event
+    -- Update message in place and record an EDIT event
     message.content = content
     message.edited = 1
     appendEvent("EDIT_MESSAGE", messageId)
