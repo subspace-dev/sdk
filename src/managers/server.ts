@@ -12,6 +12,7 @@ export interface Server {
     version?: string;
     memberCount: number;
     members?: Record<string, Member>;
+    bots?: Record<string, { approved: boolean; process: string }>; // botId -> bot info
     channels: Record<string, Channel>;
     categories: Record<string, Category>;
     roles: Record<string, Role>; // roleId -> role
@@ -162,16 +163,29 @@ export class ServerManager {
             // Prefer reading patched state from hyperbeam cache
             let info: any | null = null;
             let mappingTopLevel: Record<string, Record<string, boolean>> = {};
+            let serverBots: Record<string, { approved: boolean; process: string }> = {};
+
             try {
                 info = await this.connectionManager.hashpathGET<any>(`${serverId}~process@1.0/now/cache/server/serverinfo/~json@1.0/serialize`)
             } catch (_) {
                 info = null;
             }
+
             // Fetch roleMemberMapping from top-level cache path if available
             try {
                 const mapping = await this.connectionManager.hashpathGET<Record<string, Record<string, boolean>>>(`${serverId}~process@1.0/now/cache/server/roleMemberMapping/~json@1.0/serialize`);
                 if (mapping && typeof mapping === 'object') {
                     mappingTopLevel = mapping;
+                }
+            } catch (_) {
+                // ignore if not present
+            }
+
+            // Fetch server bots
+            try {
+                const bots = await this.connectionManager.hashpathGET<Record<string, { approved: boolean; process: string }>>(`${serverId}~process@1.0/now/cache/server/serverinfo/bots/~json@1.0/serialize`);
+                if (bots && typeof bots === 'object') {
+                    serverBots = bots;
                 }
             } catch (_) {
                 // ignore if not present
@@ -219,6 +233,7 @@ export class ServerManager {
                     description: info.description,
                     version: info.version,
                     memberCount: Number(info.memberCount) || 0,
+                    bots: serverBots,
                     channels: channelsMap,
                     categories: categoriesMap,
                     roles: rolesMap,

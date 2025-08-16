@@ -320,4 +320,128 @@ export class BotManager {
             return data ? data as Bot : null;
         });
     }
+
+    // Polling status functions for bot addition process
+    async getBotStatus(botId: string): Promise<{ joinedServers?: Record<string, boolean> } | null> {
+        try {
+            return await this.connectionManager.hashpathGET<any>(`${botId}/now/cache/bot/~json@1.0/serialize`);
+        } catch (error) {
+            console.warn(`Failed to get bot status for ${botId}:`, error);
+            return null;
+        }
+    }
+
+    async getServerBotStatus(serverId: string): Promise<Record<string, { approved: boolean; process: string }> | null> {
+        try {
+            return await this.connectionManager.hashpathGET<any>(`${serverId}~process@1.0/now/cache/server/serverinfo/bots/~json@1.0/serialize`);
+        } catch (error) {
+            console.warn(`Failed to get server bot status for ${serverId}:`, error);
+            return null;
+        }
+    }
+
+    async getSubspaceBotStatus(botId: string): Promise<{ servers?: Record<string, boolean> } | null> {
+        try {
+            return await this.connectionManager.hashpathGET<any>(`${Constants.Subspace}~process@1.0/now/cache/subspace/bots/${botId}/~json@1.0/serialize`);
+        } catch (error) {
+            console.warn(`Failed to get subspace bot status for ${botId}:`, error);
+            return null;
+        }
+    }
+
+    async pollBotAdditionStatus(
+        params: { serverId: string; botId: string },
+        onStatusUpdate?: (status: string, progress?: number) => void,
+        maxRetries: number = 20,
+        maxTotalTime: number = 60000 // 60 seconds max total time
+    ): Promise<boolean> {
+        return loggedAction('🔄 polling bot addition status', params, async () => {
+            let retries = 0;
+            const startTime = Date.now();
+
+            // Define polling intervals (in milliseconds)
+            // Start fast, then gradually increase interval to reduce cache load
+            const getPollingInterval = (attempt: number): number => {
+                if (attempt <= 3) return 1000;      // First 3 attempts: 1 second
+                if (attempt <= 6) return 2000;      // Next 3 attempts: 2 seconds  
+                if (attempt <= 10) return 3000;     // Next 4 attempts: 3 seconds  
+                return 5000;                        // After that: 5 seconds
+            };
+
+            while (retries < maxRetries) {
+                const elapsedTime = Date.now() - startTime;
+
+                // Check if we've exceeded max total time
+                if (elapsedTime > maxTotalTime) {
+                    onStatusUpdate?.("Bot addition timed out, but may still be processing...", 90);
+                    return false;
+                }
+
+                try {
+                    retries++;
+                    const progress = Math.min(25 + (retries / maxRetries) * 65, 90); // Progress from 25% to 90%
+                    const nextInterval = getPollingInterval(retries);
+
+                    onStatusUpdate?.(`Checking bot addition status... (attempt ${retries}/${maxRetries})`, progress);
+
+                    // Poll all three endpoints using connection manager
+                    const [botData, serverData, subspaceData] = await Promise.allSettled([
+                        this.getBotStatus(params.botId),
+                        this.getServerBotStatus(params.serverId),
+                        this.getSubspaceBotStatus(params.botId)
+                    ]);
+
+                    // Extract results from settled promises
+                    const botResult = botData.status === 'fulfilled' ? botData.value : null;
+                    const serverResult = serverData.status === 'fulfilled' ? serverData.value : null;
+                    const subspaceResult = subspaceData.status === 'fulfilled' ? subspaceData.value : null;
+
+                    // Check completion conditions
+                    const botJoined = botResult?.joinedServers?.[params.serverId] === true;
+                    const serverApproved = serverResult?.[params.botId]?.approved === true;
+                    const subspaceUpdated = subspaceResult?.servers?.[params.serverId] === true;
+
+                    console.log('Bot addition polling status:', {
+                        attempt: retries,
+                        nextInterval: `${nextInterval}ms`,
+                        elapsedTime: `${elapsedTime}ms`,
+                        botJoined,
+                        serverApproved,
+                        subspaceUpdated,
+                        botJoinedServers: botResult?.joinedServers,
+                        serverBots: serverResult,
+                        subspaceServers: subspaceResult?.servers
+                    });
+
+                    // All three conditions must be met for successful addition
+                    if (botJoined && serverApproved && subspaceUpdated) {
+                        onStatusUpdate?.("Bot successfully added to server!", 100);
+                        return true;
+                    }
+
+                    // Provide more specific status updates based on what's completed
+                    if (botJoined && serverApproved) {
+                        onStatusUpdate?.("Almost done, finalizing in subspace registry...", progress);
+                    } else if (botJoined) {
+                        onStatusUpdate?.("Bot joined, waiting for server approval...", progress);
+                    } else {
+                        onStatusUpdate?.("Processing bot addition...", progress);
+                    }
+
+                    // Wait with increasing interval before next poll
+                    await new Promise(resolve => setTimeout(resolve, nextInterval));
+
+                } catch (error) {
+                    console.error('Error polling bot addition status:', error);
+                    // Use a shorter interval on errors to retry quickly
+                    const errorInterval = Math.min(getPollingInterval(retries), 2000);
+                    await new Promise(resolve => setTimeout(resolve, errorInterval));
+                }
+            }
+
+            // If we've exhausted retries, return false
+            onStatusUpdate?.("Bot addition timed out, but may still be processing...", 90);
+            return false;
+        });
+    }
 } 
