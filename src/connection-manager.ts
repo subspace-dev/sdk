@@ -8,6 +8,7 @@ import type { Tag, MessageResult, AoSigner } from "./types/ao";
 export interface ConnectionConfig {
     CU_URL?: string;
     GATEWAY_URL?: string;
+    HYPERBEAM_URL?: string;
     signer?: AoSigner;
     jwk?: JWKInterface;
     owner?: string;
@@ -37,12 +38,13 @@ export class ConnectionManager {
     signer: AoSigner | null = null
     owner: string
     cuUrl: string
+    hyperbeamUrl: string
     gatewayUrl: string
     sources: Sources
-    static hyperbeamUrl: string = "https://forward.computer"
 
     constructor(config: ConnectionConfig = {}) {
         this.cuUrl = config.CU_URL || Constants.CuEndpoints[0] || 'https://cu.arnode.asia'
+        this.hyperbeamUrl = config.HYPERBEAM_URL || "https://forward.computer"
         this.gatewayUrl = config.GATEWAY_URL || 'https://arweave.net'
         this.owner = config.owner || ""
         this.jwk = config.jwk || null
@@ -57,12 +59,12 @@ export class ConnectionManager {
         this.refreshSources()
     }
 
-    static async hashpathGET<T>(path: string): Promise<T> {
+    async hashpathGET<T>(path: string): Promise<T> {
         const maxRetries = 3
         let retries = 0
         while (retries < maxRetries) {
             try {
-                const res = await fetch(`${ConnectionManager.hyperbeamUrl}/${path}`)
+                const res = await fetch(`${this.hyperbeamUrl}/${path}`)
                 return ConnectionManager.sanitizeHyperbeamResult(await res.json()) as T
             } catch (e) {
                 retries++
@@ -96,7 +98,8 @@ export class ConnectionManager {
             'x-forwarded-proto',
             'x-real-ip',
             'origin',
-            'referer'
+            'referer',
+            'cdn-loop'
         ])
 
         return Object.fromEntries(
@@ -138,7 +141,7 @@ export class ConnectionManager {
     public async refreshSources() {
         // fetch sources from Subspace process
         loggedAction('🔍 fetching sources', {}, async () => {
-            const hashpath = `https://forward.computer/${Constants.Subspace}~process@1.0/now/cache/subspace/sources/~json@1.0/serialize`
+            const hashpath = `${this.hyperbeamUrl}/${Constants.Subspace}~process@1.0/now/cache/subspace/sources/~json@1.0/serialize`
             const res = await fetch(hashpath)
             const resJson = await res.json() as Sources
 
@@ -227,7 +230,7 @@ export class ConnectionManager {
         });
     }
 
-    async sendMessage({ processId, data, tags }: { processId: string, data?: string, tags: Tag[] }): Promise<MessageResult & { id: string }> {
+    async sendMessage({ processId, data, tags, noResult = false }: { processId: string, data?: string, tags: Tag[], noResult?: boolean }): Promise<MessageResult & { id: string }> {
 
         const args = {
             process: processId,
@@ -242,6 +245,10 @@ export class ConnectionManager {
             tags
         })
         const messageId: string = await this.ao.message(args)
+
+        if (noResult) {
+            return { id: messageId } as any
+        }
 
         const res: MessageResult & { id: string } = await this.ao.result({
             process: processId,

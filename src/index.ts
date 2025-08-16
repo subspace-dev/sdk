@@ -32,6 +32,7 @@ export class Subspace {
     getConnectionInfo() {
         return {
             cuUrl: this.connectionManager.getCuUrl(),
+            hyperbeamUrl: this.connectionManager.hyperbeamUrl,
             owner: this.connectionManager.owner,
             hasJwk: !!this.connectionManager.jwk,
             hasSigner: !!this.connectionManager.signer

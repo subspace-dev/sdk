@@ -16,6 +16,7 @@ export declare class Subspace {
     updateConfig(config: Partial<ConnectionConfig>): void;
     getConnectionInfo(): {
         cuUrl: string;
+        hyperbeamUrl: string;
         owner: string;
         hasJwk: boolean;
         hasSigner: boolean;

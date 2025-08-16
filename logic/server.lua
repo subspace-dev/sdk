@@ -198,7 +198,7 @@ function RoleHasPermission(role, permission)
     return role.permissions & permission == permission
 end
 
--- Resolve member’s effective permissions across all roles.
+-- Resolve member's effective permissions across all roles.
 -- ADMINISTRATOR or server Owner short-circuit to true.
 function MemberHasPermission(member, permission)
     -- return true if the member has the permission, false otherwise
@@ -572,7 +572,7 @@ local function GetNextChannelId()
     return tostring(maxId + 1)
 end
 
--- Push a snapshot of server state to Hyperbeam’s patch cache for fast reads
+-- Push a snapshot of server state to Hyperbeam's patch cache for fast reads
 function SyncProcessState()
     -- This function is used to take all the possible data and couple it into
     -- a single table which will be stored in Hyperbeams state for quick access.
@@ -2237,13 +2237,25 @@ Handlers.add("Edit-Message", function(msg)
     if ValidateCondition(not channelId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "Message not found"
+                error = "Channel ID is required"
             })
         }) then
         return
     end
 
     if channelId then channelId = tostring(channelId) end
+
+    -- Validate that the channel exists
+    local channel = GetChannel(channelId)
+    if ValidateCondition(not channel, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Channel not found"
+            })
+        }) then
+        return
+    end
+
     local messageBucket = messages[channelId] or {}
     local message = messageBucket[messageId]
     if ValidateCondition(not message, msg, {
@@ -2306,13 +2318,25 @@ Handlers.add("Delete-Message", function(msg)
     if ValidateCondition(not channelId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "Message not found"
+                error = "Channel ID is required"
             })
         }) then
         return
     end
 
     if channelId then channelId = tostring(channelId) end
+
+    -- Validate that the channel exists
+    local channel = GetChannel(channelId)
+    if ValidateCondition(not channel, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Channel not found"
+            })
+        }) then
+        return
+    end
+
     local messageBucket = messages[channelId] or {}
     local message = messageBucket[messageId]
     if ValidateCondition(not message, msg, {

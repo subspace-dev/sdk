@@ -60,7 +60,7 @@ export class UserManager {
         return loggedAction('🔍 getting profile', { userId }, async () => {
             let data: Profile | null = null
             try {
-                data = await ConnectionManager.hashpathGET<Profile>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/${userId}/~json@1.0/serialize`)
+                data = await this.connectionManager.hashpathGET<Profile>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/${userId}/~json@1.0/serialize`)
             } catch (e) {
                 throw new Error("[subspace-sdk] failed to get profile: " + e)
                 return null
@@ -68,7 +68,11 @@ export class UserManager {
 
             const wanderTierInfo = await getWanderTierInfo(userId)
 
-            const primaryName = await getPrimaryName(userId)
+            let primaryName: string | undefined = undefined
+            try {
+                primaryName = await getPrimaryName(userId)
+            } catch (e) {
+            }
 
             const profile: Profile = {
                 userId,
@@ -83,7 +87,7 @@ export class UserManager {
                     sent: [],
                     received: []
                 },
-                primaryName,
+                primaryName: primaryName || undefined,
                 wndrTier: wanderTierInfo || undefined
             }
             return profile;
@@ -118,7 +122,7 @@ export class UserManager {
 
     async getBulkProfiles(userIds: string[]): Promise<Profile[]> {
         return loggedAction('🔍 getting bulk profiles', { userCount: userIds.length }, async () => {
-            const profiles = await ConnectionManager.hashpathGET<Record<string, any>>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/~json@1.0/serialize`)
+            const profiles = await this.connectionManager.hashpathGET<Record<string, any>>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/~json@1.0/serialize`)
             const profilesArray: Profile[] = []
             for (const userId of userIds) {
                 const profile = profiles[userId]

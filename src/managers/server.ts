@@ -160,17 +160,17 @@ export class ServerManager {
 
     async getServer(serverId: string): Promise<Server | null> {
         return loggedAction('🔍 getting server', { serverId }, async () => {
-            // Prefer reading patched state from forward.computer cache
+            // Prefer reading patched state from hyperbeam cache
             let info: any | null = null;
             let mappingTopLevel: Record<string, Record<string, boolean>> = {};
             try {
-                info = await ConnectionManager.hashpathGET<any>(`${serverId}~process@1.0/now/cache/server/serverinfo/~json@1.0/serialize`)
+                info = await this.connectionManager.hashpathGET<any>(`${serverId}~process@1.0/now/cache/server/serverinfo/~json@1.0/serialize`)
             } catch (_) {
                 info = null;
             }
             // Fetch roleMemberMapping from top-level cache path if available
             try {
-                const mapping = await ConnectionManager.hashpathGET<Record<string, Record<string, boolean>>>(`${serverId}~process@1.0/now/cache/server/roleMemberMapping/~json@1.0/serialize`);
+                const mapping = await this.connectionManager.hashpathGET<Record<string, Record<string, boolean>>>(`${serverId}~process@1.0/now/cache/server/roleMemberMapping/~json@1.0/serialize`);
                 if (mapping && typeof mapping === 'object') {
                     mappingTopLevel = mapping;
                 }
@@ -303,7 +303,7 @@ export class ServerManager {
         return loggedAction('🔍 getting member', { serverId, userId }, async () => {
             let member: Record<string, any> | null = null;
             try {
-                member = await ConnectionManager.hashpathGET<Record<string, any>>(`${serverId}~process@1.0/now/cache/server/members/${userId}/~json@1.0/serialize`)
+                member = await this.connectionManager.hashpathGET<Record<string, any>>(`${serverId}~process@1.0/now/cache/server/members/${userId}/~json@1.0/serialize`)
             } catch (_) {
                 member = null;
             }
@@ -335,7 +335,7 @@ export class ServerManager {
         return loggedAction('🔍 getting all members', { serverId }, async () => {
             let members: Record<string, any> | null = null;
             try {
-                members = await ConnectionManager.hashpathGET<Record<string, any>>(`${serverId}~process@1.0/now/cache/server/members/~json@1.0/serialize`)
+                members = await this.connectionManager.hashpathGET<Record<string, any>>(`${serverId}~process@1.0/now/cache/server/members/~json@1.0/serialize`)
             } catch (_) {
                 members = null;
             }
@@ -795,25 +795,30 @@ export class ServerManager {
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
                 data: params.content,
-                tags
+                tags,
+                noResult: true // assume the message is gonna be successful anyway, donot eval the result (faster)
             });
 
-            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Send-Message-Response" });
-            console.log("🔧 SDK DEBUG: Send-Message-Response", data)
-            return data?.Tags?.Status === "200";
+            if (res.id && res.id.length == 43) {
+                return true;
+            }
+
+            // const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Send-Message-Response" });
+            // console.log("🔧 SDK DEBUG: Send-Message-Response", data)
+            // return data?.Tags?.Status === "200";
         });
     }
 
-    async editMessage(serverId: string, params: { messageId: string; content: string }): Promise<boolean> {
-        return loggedAction('✏️ editing message', { serverId, messageId: params.messageId }, async () => {
+    async editMessage(serverId: string, channelId: string, messageId: string, content: string): Promise<boolean> {
+        return loggedAction('✏️ editing message', { serverId, channelId, messageId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.EditMessage },
-                    { name: "Message-Id", value: params.messageId },
-                    // { name: "Content", value: params.content }
+                    { name: "Channel-Id", value: channelId },
+                    { name: "Message-Id", value: messageId },
                 ],
-                data: params.content
+                data: content
             });
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Edit-Message-Response" });
@@ -821,12 +826,13 @@ export class ServerManager {
         });
     }
 
-    async deleteMessage(serverId: string, messageId: string): Promise<boolean> {
-        return loggedAction('🗑️ deleting message', { serverId, messageId }, async () => {
+    async deleteMessage(serverId: string, channelId: string, messageId: string): Promise<boolean> {
+        return loggedAction('🗑️ deleting message', { serverId, channelId, messageId }, async () => {
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.DeleteMessage },
+                    { name: "Channel-Id", value: channelId },
                     { name: "Message-Id", value: messageId }
                 ]
             });
@@ -840,7 +846,7 @@ export class ServerManager {
         return loggedAction('🔍 getting message', { serverId, messageId }, async () => {
             let all: Record<string, Record<string, any>> | null = null;
             try {
-                const url = `https://forward.computer/${serverId}~process@1.0/now/cache/server/messages/~json@1.0/serialize`;
+                const url = `${this.connectionManager.hyperbeamUrl}/${serverId}~process@1.0/now/cache/server/messages/~json@1.0/serialize`;
                 const res = await fetch(url);
                 if (res.ok) {
                     all = (await res.json()) as Record<string, Record<string, any>>;
@@ -875,7 +881,7 @@ export class ServerManager {
         return loggedAction('🔍 getting messages', { serverId, channelId: params.channelId, limit: params.limit }, async () => {
             let all: Record<string, Record<string, any>> | null = null;
             try {
-                const url = `https://forward.computer/${serverId}~process@1.0/now/cache/server/messages/~json@1.0/serialize`;
+                const url = `${this.connectionManager.hyperbeamUrl}/${serverId}~process@1.0/now/cache/server/messages/~json@1.0/serialize`;
                 const res = await fetch(url);
                 if (res.ok) {
                     all = (await res.json()) as Record<string, Record<string, any>>;
