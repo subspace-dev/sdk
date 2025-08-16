@@ -307,7 +307,6 @@ export class ServerManager {
             } catch (_) {
                 member = null;
             }
-            console.log(member)
             // Endpoint may return either an object keyed by userId or the member object directly
             const raw = (member && (member as any)[userId]) ? (member as any)[userId] : (member as any);
             if (!raw) return null;
@@ -561,7 +560,6 @@ export class ServerManager {
             if (params.allowMessaging !== undefined) tags.push({ name: "Allow-Messaging", value: params.allowMessaging.toString() });
             if (params.allowAttachments !== undefined) tags.push({ name: "Allow-Attachments", value: params.allowAttachments.toString() });
 
-            // console.log('📤 SDK: Sending tags to server:', tags);
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
@@ -569,7 +567,6 @@ export class ServerManager {
             });
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Channel-Response" });
-            // console.log('📥 SDK: Server response:', data);
             return data?.Tags?.Status === "200";
         });
     }

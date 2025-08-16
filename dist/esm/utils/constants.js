@@ -1,4 +1,3 @@
-// console.log("SUBSPACE_ID", process.env.SUBSPACE_ID)
 export const Constants = {
     // Subspace: 'H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY',
     Subspace: 'RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo',

@@ -72,7 +72,6 @@ Handlers.add("Update-Bot", function(msg)
     -- Update in-memory bot metadata; omit fields that were not provided
     if publicBot ~= nil then PublicBot = publicBot end
     if name then Name = name end
-
     if pfp then Pfp = pfp end
     if description then Description = description end
 

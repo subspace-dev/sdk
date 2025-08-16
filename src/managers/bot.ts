@@ -128,9 +128,6 @@ export class BotManager {
                 botInfo.version = botprocessBotData.version;
                 botInfo.owner = botprocessBotData.owner;
             }
-            console.log("subspaceBotData", botprocessBotData);
-            console.log("botProcessData", subspaceBotData);
-            console.log(botInfo);
             return botInfo;
         });
     }
@@ -253,8 +250,9 @@ export class BotManager {
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Update-Bot-Response" });
+
+            return data?.Tags?.Status === "200";
         });
     }
 

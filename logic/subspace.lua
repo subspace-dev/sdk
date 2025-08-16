@@ -1721,16 +1721,16 @@ end)
 Handlers.add("Update-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local botId = VarOrNil(msg.Tags.BotProcess)
-    local public = VarOrNil(msg.Tags.PublicBot)
-    local name = VarOrNil(msg.Tags.Name)
-    local pfp = VarOrNil(msg.Tags.Pfp)
-    local description = VarOrNil(msg.Tags.Description)
+    local botId = VarOrNil(msg.Tags["Bot-Process"])
+    local public = VarOrNil(msg.Tags["Public-Bot"])
+    local name = VarOrNil(msg.Tags["Name"])
+    local pfp = VarOrNil(msg.Tags["Pfp"])
+    local description = VarOrNil(msg.Tags["Description"])
 
     if ValidateCondition(not botId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotProcess is required"
+                error = "Bot-Process is required"
             })
         })
     then
@@ -1762,7 +1762,7 @@ Handlers.add("Update-Bot", function(msg)
         return
     end
 
-    if ValidateCondition(bot.userId ~= userId, msg, {
+    if ValidateCondition(bot.owner ~= userId, msg, {
             Status = "403",
             Data = json.encode({
                 error = "You are not the owner of this bot"
@@ -1838,13 +1838,13 @@ end)
 Handlers.add("Add-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local botProcess = VarOrNil(msg.Tags.BotProcess)
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
     local serverId = VarOrNil(msg.Tags["Server-Id"])
 
     if ValidateCondition(not botProcess, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotProcess is required"
+                error = "Bot-Process is required"
             })
         })
     then
@@ -1953,12 +1953,12 @@ end)
 
 Handlers.add("Remove-Bot", function(msg)
     local serverId = msg.From
-    local botProcess = VarOrNil(msg.Tags.BotProcess)
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
 
     if ValidateCondition(not botProcess, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotProcess is required"
+                error = "Bot-Process is required"
             })
         })
     then

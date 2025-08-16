@@ -2571,13 +2571,13 @@ Handlers.add("Add-Bot", function(msg)
 
     local userId = msg["X-Origin"]
 
-    local botProcess = VarOrNil(msg.Tags.BotProcess)
-    local serverId = VarOrNil(msg.Tags.ServerId)
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
 
     if ValidateCondition(not botProcess, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotProcess is required"
+                error = "Bot-Process is required"
             })
         }) then
         return
@@ -2586,7 +2586,7 @@ Handlers.add("Add-Bot", function(msg)
     if ValidateCondition(not serverId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "ServerId is required"
+                error = "Server-Id is required"
             })
         }) then
         return
@@ -2640,7 +2640,7 @@ end)
 Handlers.add("Approve-Add-Bot", function(msg)
     assert(msg.From == Subspace, "You are not allowed to approve bots")
 
-    local botProcess = VarOrNil(msg.Tags.BotProcess)
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
 
     local bot = bots[botProcess]
     if ValidateCondition(not bot, msg, {
@@ -2688,7 +2688,7 @@ end)
 
 Handlers.add("Remove-Bot", function(msg)
     local userId = msg.From
-    local botProcess = VarOrNil(msg.Tags.BotProcess)
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
 
     -- verify if user has permission to remove bots
     local member = GetMember(userId)
@@ -2734,7 +2734,7 @@ Handlers.add("Remove-Bot", function(msg)
         Target = Subspace,
         Action = "Remove-Bot",
         Tags = {
-            BotProcess = botProcess
+            ["Bot-Process"] = botProcess
         }
     })
 
