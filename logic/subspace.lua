@@ -8,7 +8,7 @@ Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 
 Sources = {
     Bot = {
-        Id = "UM4or54rO78SjbRwlfLiJLQvfkywR2W77S78TyfnXKM",
+        Id = "0yFR8HCG_4y9eS0S6-hbrFZIgaM-97gMNB-WWiwOogQ",
         Version = "1.0.0"
     },
     Dm = {
@@ -16,7 +16,7 @@ Sources = {
         Version = "1.0.0"
     },
     Server = {
-        Id = "qj2Q_6R7U3QXbD9G30m97BN3xM6ZiSb7M-PKJxU8fkQ",
+        Id = "Tq5ZJlO4xAS7QtXlSZyGeBUOI6vkKvQGTzsn8_gqmdM",
         Version = "1.0.0"
     },
 }
