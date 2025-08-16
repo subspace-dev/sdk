@@ -116,17 +116,19 @@ export class BotManager {
             const botInfo: Bot = {};
 
             if (botprocessBotData) {
-                botInfo.public = subspaceBotData.public || false;
-                botInfo.joinedServers = subspaceBotData.joinedServers || {};
-                botInfo.name = subspaceBotData?.name || 'Unknown Bot';
-                botInfo.pfp = subspaceBotData?.pfp;
-                botInfo.description = subspaceBotData?.description;
+                botInfo.public = botprocessBotData.publicBot || false;
+                botInfo.joinedServers = botprocessBotData.joinedServers || {};
+                botInfo.subscribedServers = botprocessBotData.subscribedServers || {};
+                botInfo.name = botprocessBotData?.name || 'Unknown Bot';
+                botInfo.pfp = botprocessBotData?.pfp;
+                botInfo.description = botprocessBotData?.description;
+                botInfo.version = botprocessBotData?.version || 'unknown';
+                botInfo.owner = botprocessBotData?.owner || '';
                 botInfo.process = botId;
             }
             if (subspaceBotData) {
-                botInfo.subscribedServers = botprocessBotData.subscribedServers || {};
-                botInfo.version = botprocessBotData.version;
-                botInfo.owner = botprocessBotData.owner;
+                // Subspace data can override some fields if available
+                botInfo.owner = subspaceBotData.owner || botInfo.owner;
             }
             return botInfo;
         });
@@ -159,14 +161,14 @@ export class BotManager {
 
                     if (botState) {
                         result[botId] = {
-                            public: botState.public || false,
+                            public: botState.publicBot || false,
                             subscribedServers: botState.subscribedServers || {},
                             joinedServers: botState.joinedServers || {},
-                            name: metadata.name || 'Unknown Bot',
-                            pfp: metadata.pfp,
-                            description: metadata.description,
+                            name: botState.name || metadata.name || 'Unknown Bot',
+                            pfp: botState.pfp || metadata.pfp,
+                            description: botState.description || metadata.description,
                             process: botId,
-                            owner: metadata.owner || botState.owner || '',
+                            owner: botState.owner || metadata.owner || '',
                             version: botState.version || 'unknown',
                         };
                     }
@@ -184,24 +186,27 @@ export class BotManager {
         });
     }
 
-    async addBotToServer(params: { serverId: string; botId: string; permissions?: any }): Promise<boolean> {
+    async addBotToServer(params: { serverId: string; botId: string }): Promise<boolean> {
         return loggedAction('➕ adding bot to server', params, async () => {
             const tags: Tag[] = [
                 { name: "Action", value: Constants.Actions.AddBot },
-                { name: "BotProcess", value: params.botId }
+                { name: "Bot-Process", value: params.botId },
+                { name: "Server-Id", value: params.serverId }
             ];
 
-            if (params.permissions) {
-                tags.push({ name: "Permissions", value: JSON.stringify(params.permissions) });
-            }
-
             const res = await this.connectionManager.sendMessage({
-                processId: params.serverId,
+                processId: Constants.Subspace,
                 tags
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const msg = this.connectionManager.parseOutput(res, {
+                hasMatchingTag: "Action",
+                hasMatchingTagValue: "Add-Bot-Response"
+            });
+
+            // Check if the initial request was accepted (Status: 200)
+            // The actual bot addition is an async multi-step process
+            return msg?.Tags?.Status === "200";
         });
     }
 
@@ -211,12 +216,16 @@ export class BotManager {
                 processId: params.serverId,
                 tags: [
                     { name: "Action", value: Constants.Actions.RemoveBot },
-                    { name: "BotProcess", value: params.botId }
+                    { name: "Bot-Process", value: params.botId }
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
+            const msg = this.connectionManager.parseOutput(res, {
+                hasMatchingTag: "Action",
+                hasMatchingTagValue: "Remove-Bot-Response"
+            });
+
+            return msg?.Tags?.Status === "200";
         });
     }
 

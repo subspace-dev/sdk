@@ -2592,6 +2592,16 @@ Handlers.add("Add-Bot", function(msg)
         return
     end
 
+    -- verify serverId is the if of this server
+    if ValidateCondition(serverId ~= ao.id, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Server-Id is not the id of this server"
+            })
+        }) then
+        return
+    end
+
     -- member exists and has permissions to add bots
     local member = GetMember(userId)
     if ValidateCondition(not member, msg, {
@@ -2630,9 +2640,22 @@ Handlers.add("Add-Bot", function(msg)
         process = botProcess
     }
 
-    msg.reply({
+    -- msg.reply({
+    --     Action = "Add-Bot-Response",
+    --     Status = "200",
+    --     Tags = {
+    --         ["Bot-Process"] = botProcess,
+    --         ["Status"] = "200"
+    --     }
+    -- })
+    Send({
+        Target = Subspace,
         Action = "Add-Bot-Response",
         Status = "200",
+        Tags = {
+            ["Bot-Process"] = botProcess,
+            ["Server-Id"] = serverId
+        }
     })
     SyncProcessState()
 end)
@@ -2658,6 +2681,9 @@ Handlers.add("Approve-Add-Bot", function(msg)
     msg.reply({
         Action = "Approve-Add-Bot-Response",
         Status = "200",
+        Tags = {
+            ["Bot-Process"] = botProcess
+        }
     })
     SyncProcessState()
 end)

@@ -175,6 +175,7 @@ function SyncProcessState()
         delegations = delegations,
         bots = bots,
         notifications = notifications,
+        add_bot_tracker = add_bot_tracker
     }
 
     -- Special message to the patch device which will update the cache in hyperbeam nodes
@@ -1835,6 +1836,9 @@ end)
 --     })
 -- end)
 
+-- keep track of bots that are being added to servers
+add_bot_tracker = add_bot_tracker or {}
+
 Handlers.add("Add-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
@@ -1894,6 +1898,16 @@ Handlers.add("Add-Bot", function(msg)
         return
     end
 
+    -- add bot to add_bot_tracker
+    if not add_bot_tracker[botProcess] then
+        add_bot_tracker[botProcess] = {}
+    end
+
+    add_bot_tracker[botProcess][serverId] = {
+        add_bot = true
+    }
+    SyncProcessState()
+
     msg.forward(serverId)
     msg.reply({
         Action = "Add-Bot-Response",
@@ -1902,12 +1916,41 @@ Handlers.add("Add-Bot", function(msg)
             message = "Bot add request sent to server"
         })
     })
+end)
 
-    local addResponse = Receive({ Action = "Add-Bot-Response", From = serverId })
-    if ValidateCondition(addResponse.Status ~= "200", msg, {
-            Status = "500",
-            Data = json.encode(addResponse.Data)
-        }) then
+Handlers.add("Add-Bot-Response", function(msg)
+    local serverId = msg.From
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
+    local status = VarOrNil(msg.Tags["Status"])
+    local data = VarOrNil(msg.Data) -- any error returned
+
+    if ValidateCondition(not add_bot_tracker[botProcess] or not add_bot_tracker[botProcess][serverId] or not add_bot_tracker[botProcess][serverId].add_bot, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Add-Bot was not triggered"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(not status, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Status is required"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(status ~= "200", msg, {
+            Status = status,
+            Data = json.encode({
+                error = data
+            })
+        })
+    then
         return
     end
 
@@ -1915,41 +1958,120 @@ Handlers.add("Add-Bot", function(msg)
     ao.send({
         Target = botProcess,
         Action = "Join-Server",
-        Tags = { ServerId = serverId }
+        Tags = { ["Server-Id"] = serverId }
     })
-    local joinResponse = Receive({ Action = "Join-Server-Response", From = botProcess })
-    if ValidateCondition(joinResponse.Status ~= "200", msg, {
-            Status = "500",
-            Data = json.encode(joinResponse.Data)
-        }) then
+
+    add_bot_tracker[botProcess][serverId] = {
+        add_bot_response = true
+    }
+    SyncProcessState()
+end)
+
+Handlers.add("Join-Server-Response", function(msg)
+    local botProcess = msg.From
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
+    local status = VarOrNil(msg.Tags["Status"])
+
+    if ValidateCondition(not add_bot_tracker[botProcess] or not add_bot_tracker[botProcess][serverId] or not add_bot_tracker[botProcess][serverId].add_bot_response, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Add-Bot-Response was not triggered"
+            })
+        })
+    then
         return
     end
 
-    -- add bot to serversJoined table
-    -- SQLWrite("INSERT INTO botServers (botProcess, serverId) VALUES (?, ?)", botProcess, serverId)
-    bot.servers[serverId] = true
+    if ValidateCondition(status ~= "200", msg, {
+            Status = status,
+            Data = json.encode({
+                error = "Bot failed to join server"
+            })
+        })
+    then
+        return
+    end
+
+    -- send message to server to approve bot
     ao.send({
         Target = serverId,
         Action = "Approve-Add-Bot",
-        Tags = {
-            BotProcess = botProcess
-        }
+        Tags = { ["Bot-Process"] = botProcess }
     })
-    local approveResponse = Receive({ Action = "Approve-Add-Bot-Response", From = serverId })
-    if ValidateCondition(approveResponse.Status ~= "200", msg, {
-            Status = "500",
-            Data = json.encode(approveResponse.Data)
-        }) then
+
+    add_bot_tracker[botProcess][serverId] = {
+        join_server_response = true
+    }
+    SyncProcessState()
+end)
+
+Handlers.add("Approve-Add-Bot-Response", function(msg)
+    local serverId = msg.From
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
+    local status = VarOrNil(msg.Tags["Status"])
+
+    if ValidateCondition(not add_bot_tracker[botProcess] or not add_bot_tracker[botProcess][serverId] or not add_bot_tracker[botProcess][serverId].join_server_response, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Join-Server-Response was not triggered"
+            })
+        })
+    then
         return
     end
 
-    SyncProcessState()
+    if ValidateCondition(status ~= "200", msg, {
+            Status = status,
+            Data = json.encode({
+                error = "Server failed to approve bot"
+            })
+        })
+    then
+        return
+    end
+
+    -- send message to bot to complete join
     ao.send({
         Target = botProcess,
-        Status = "200",
         Action = "Join-Server-Success",
+        Tags = { ["Server-Id"] = serverId }
     })
+
+    add_bot_tracker[botProcess][serverId] = {
+        approve_add_bot_response = true
+    }
+    SyncProcessState()
 end)
+
+Handlers.add("Join-Server-Success-Response", function(msg)
+    local botProcess = msg.From
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
+
+    if ValidateCondition(not add_bot_tracker[botProcess] or not add_bot_tracker[botProcess][serverId] or not add_bot_tracker[botProcess][serverId].approve_add_bot_response, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Approve-Add-Bot-Response was not triggered"
+            })
+        })
+    then
+        return
+    end
+
+    -- Mark bot as successfully joined in our tracker
+    if not bots[botProcess] then
+        bots[botProcess] = {}
+    end
+    if not bots[botProcess].servers then
+        bots[botProcess].servers = {}
+    end
+    bots[botProcess].servers[serverId] = true
+
+    add_bot_tracker[botProcess][serverId] = {
+        join_server_success = true
+    }
+    SyncProcessState()
+end)
+
 
 Handlers.add("Remove-Bot", function(msg)
     local serverId = msg.From

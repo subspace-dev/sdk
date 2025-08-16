@@ -2,6 +2,7 @@ import { ConnectionManager } from './connection-manager';
 import { UserManager } from './managers/user';
 import { ServerManager } from './managers/server';
 import { BotManager } from './managers/bot';
+export { EPermissions } from './types/subspace';
 export class Subspace {
     connectionManager;
     user;

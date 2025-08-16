@@ -11,10 +11,9 @@ export interface Server {
     description?: string;
     version?: string;
     memberCount: number;
-    members?: Member[];
+    members?: Record<string, Member>;
     channels: Record<string, Channel>;
     categories: Record<string, Category>;
-    // roles: Role[];
     roles: Record<string, Role>; // roleId -> role
     roleMemberMapping?: Record<string, Record<string, boolean>>; // roleId -> { userId: true }
     createdAt?: number;
@@ -341,6 +340,7 @@ export class ServerManager {
             const result: Record<string, Member> = {};
             if (members) {
                 Object.entries(members).forEach(([uid, raw]) => {
+                    console.log('Debug - raw member:', uid, raw)
                     if (!raw) return;
                     result[uid] = {
                         userId: raw.userId || uid,

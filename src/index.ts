@@ -9,6 +9,7 @@ export type { Server, Member, Channel, Category, Role, Message, MessagesResponse
 export type { Bot } from './managers/bot';
 export type { Tag, MessageResult, AoSigner } from './types/ao';
 export type { ConnectionConfig } from './connection-manager';
+export { EPermissions } from './types/subspace';
 
 export class Subspace {
     connectionManager: ConnectionManager;

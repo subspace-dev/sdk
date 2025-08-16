@@ -104,9 +104,9 @@ function SyncProcessState()
     })
 end
 
-InitialSync = InitialSync or true
-if InitialSync then
-    InitialSync = false
+InitialSync = InitialSync or false
+if not InitialSync then
+    InitialSync = true
     SyncProcessState()
     print("✅ Bot initial sync complete")
 end
@@ -128,37 +128,65 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    -- Hook: black/allow list checks could be added here if needed
+    -- Reply to Subspace that we're ready to join
     msg.reply({
         Action = "Join-Server-Response",
         Status = "200",
+        Tags = { ["Server-Id"] = serverId }
     })
-    local joinResponse = Receive({ Action = "Join-Server-Success", From = serverId })
-    if ValidateCondition(joinResponse.Status ~= "200", msg, {
-            Status = "500",
-            Data = json.encode(joinResponse.Data)
-        }) then
-        return
-    end
-
-    JoinedServers[tostring(serverId)] = true
-
-    -- Subscribe to server events after a successful join
-    ao.send({
-        Target = serverId,
-        Action = "Subscribe",
-    })
-    local subscribeResponse = Receive({ Action = "Subscribe-Response", From = serverId })
-    if ValidateCondition(subscribeResponse.Status ~= "200", msg, {
-            Status = "500",
-            Data = json.encode(subscribeResponse.Data)
-        }) then
-        return
-    end
-
-    SubscribedServers[tostring(serverId)] = true
     SyncProcessState()
 end)
+
+-- Handle successful server approval and complete the join process
+Handlers.add("Join-Server-Success", function(msg)
+    assert(msg.From == Subspace, "You are not allowed to complete server join")
+
+    local serverId = VarOrNil(msg.Tags["Server-Id"])
+
+    if ValidateCondition(not serverId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "ServerId is required"
+            })
+        }) then
+        return
+    end
+
+    -- Mark as joined
+    JoinedServers[tostring(serverId)] = true
+
+    -- Subscribe to server events
+    ao.send({
+        Target = serverId,
+        Action = "Subscribe"
+    })
+    ao.send({
+        Target = Subspace,
+        Action = "Join-Server-Success-Response",
+        Tags = { ["Server-Id"] = serverId }
+    })
+
+    SyncProcessState()
+end)
+
+-- Handle subscription response from server
+Handlers.add("Subscribe-Response", function(msg)
+    local serverId = msg.From
+    local status = VarOrNil(msg.Tags["Status"])
+
+    if status == "200" then
+        SubscribedServers[tostring(serverId)] = true
+        SyncProcessState()
+        print("✅ Bot successfully subscribed to server", serverId)
+    else
+        -- If subscription failed, cleanup joined state
+        JoinedServers[tostring(serverId)] = nil
+        SyncProcessState()
+        print("❌ Bot failed to subscribe to server", serverId)
+    end
+end)
+
+
 
 -- Server has removed the bot: clean up local membership/subscription and unsubscribe
 Handlers.add("Remove-Bot", function(msg)
