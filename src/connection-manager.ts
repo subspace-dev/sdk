@@ -99,7 +99,12 @@ export class ConnectionManager {
             'x-real-ip',
             'origin',
             'referer',
-            'cdn-loop'
+            'cdn-loop',
+            'cf-connecting-ip',
+            'cf-ipcountry',
+            'cf-ray',
+            'cf-visitor',
+            'remote-host',
         ])
 
         return Object.fromEntries(

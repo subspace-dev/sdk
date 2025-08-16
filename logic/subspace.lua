@@ -8,7 +8,7 @@ Authority = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY"
 
 Sources = {
     Bot = {
-        Id = "HkB1WOco7nYXp73qYyGgyF6QkeJtFG5qIi4MaXsd1iY",
+        Id = "UM4or54rO78SjbRwlfLiJLQvfkywR2W77S78TyfnXKM",
         Version = "1.0.0"
     },
     Dm = {
@@ -64,111 +64,9 @@ delegations = delegations or {}         -- mapping for delegated id to original 
 servers = servers or {}
 bots = bots or {}                       -- includes botServers
 
--- function CurrentStateToTables()
---     local dbProfiles = SQLRead("SELECT * FROM profiles")
---     for _, profile in ipairs(dbProfiles) do
---         profiles[profile.userId] = {
---             pfp = profile.pfp,
---             dmProcess = profile.dmProcess,
---             serversJoined = {},
---             friends = {
---                 accepted = {},
---                 sent = {},
---                 received = {}
---             },
---             delegations = {}
---         }
---     end
-
---     local serversJoined = SQLRead("SELECT * FROM serversJoined")
---     for _, serverJoined in ipairs(serversJoined) do
---         profiles[serverJoined.userId].serversJoined[serverJoined.serverId] = { orderId = serverJoined.orderId }
---     end
-
---     local servers = SQLRead("SELECT * FROM servers")
---     for _, server in ipairs(servers) do
---         servers[server.serverId] = {
---             publicServer = server.publicServer,
---             ownerId = server.userId
---         }
---     end
--- end
 
 ----------------------------------------------------------------------------
 
--- db:exec([[
---     CREATE TABLE IF NOT EXISTS profiles (
---         userId TEXT PRIMARY KEY,
---         pfp TEXT DEFAULT "",
---         dmProcess TEXT DEFAULT ""
---     );
-
---     CREATE TABLE IF NOT EXISTS serversJoined (
---         userId TEXT NOT NULL,
---         serverId TEXT NOT NULL,
---         orderId INTEGER DEFAULT 0,
---         PRIMARY KEY (userId, serverId)
---     );
-
---     CREATE TABLE IF NOT EXISTS friends (
---         senderId TEXT NOT NULL,
---         receiverId TEXT NOT NULL,
---         accepted INTEGER DEFAULT 0,
---         PRIMARY KEY (senderId, receiverId)
---     );
-
---     CREATE TABLE IF NOT EXISTS servers (
---         serverId TEXT PRIMARY KEY,
---         publicServer INTEGER DEFAULT 1,
---         userId TEXT NOT NULL
---     );
-
---     CREATE TABLE IF NOT EXISTS notifications (
---         notificationId INTEGER PRIMARY KEY AUTOINCREMENT,
---         serverOrDmId TEXT NOT NULL,
---         fromUserId TEXT NOT NULL,
---         forUserId TEXT NOT NULL,
---         timestamp INTEGER DEFAULT 0,
---         source TEXT NOT NULL CHECK (source IN ('SERVER', 'DM')),
---         channelId INTEGER,
---         serverName TEXT,
---         channelName TEXT,
---         authorName TEXT,
---         messageTxId TEXT,
-
---         FOREIGN KEY (fromUserId) REFERENCES profiles(userId),
---         FOREIGN KEY (forUserId) REFERENCES profiles(userId),
---         CHECK (
---             (source = 'SERVER' AND channelId IS NOT NULL) OR
---             (source = 'DM' AND channelId IS NULL)
---         )
---     );
-
---     CREATE TABLE IF NOT EXISTS delegations (
---         userId TEXT NOT NULL,
---         delegatedUserId TEXT NOT NULL,
---         PRIMARY KEY (userId, delegatedUserId)
---     );
-
---     CREATE TABLE IF NOT EXISTS bots (
---         userId TEXT NOT NULL,
---         botProcess TEXT PRIMARY KEY,
---         botName TEXT NOT NULL,
---         botPfp TEXT NOT NULL,
---         botPublic INTEGER DEFAULT 0,
-
---         FOREIGN KEY (userId) REFERENCES profiles(userId)
---     );
-
---     CREATE TABLE IF NOT EXISTS botServers (
---         botProcess TEXT NOT NULL,
---         serverId TEXT NOT NULL,
---         PRIMARY KEY (botProcess, serverId)
-
---         FOREIGN KEY (botProcess) REFERENCES bots(botProcess)
---         FOREIGN KEY (serverId) REFERENCES servers(serverId)
---     );
--- ]])
 
 -- table helper functions
 
@@ -1696,7 +1594,7 @@ end)
 Handlers.add("Mark-Read", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local notificationId = VarOrNil(msg.Tags.NotificationId)
+    local notificationId = VarOrNil(msg.Tags["Notification-Id"])
 
     local profile = GetProfile(userId)
     if ValidateCondition(not profile, msg, {
@@ -1711,7 +1609,7 @@ Handlers.add("Mark-Read", function(msg)
     if ValidateCondition(not notificationId, msg, {
             Status = "400",
             Data = json.encode({
-                error = "NotificationId is required"
+                error = "Notification-Id is required"
             })
         }) then
         return
@@ -1774,16 +1672,17 @@ end)
 Handlers.add("Create-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
-    local botProcess = VarOrNil(msg.Tags.BotProcess)
-    local publicBot = VarOrNil(msg.Tags.PublicBot)
-    publicBot = (publicBot == "true")
-    local botName = VarOrNil(msg.Tags.Name)
-    local botPfp = VarOrNil(msg.Tags.Pfp)
+    local process = VarOrNil(msg.Tags["Bot-Process"])
+    local public = VarOrNil(msg.Tags["Public-Bot"])
+    public = (public == "true")
+    local name = VarOrNil(msg.Tags["Name"])
+    local pfp = VarOrNil(msg.Tags["Pfp"])
+    local description = VarOrNil(msg.Tags["Description"])
 
-    if ValidateCondition(not botProcess or #botProcess ~= 43, msg, {
+    if ValidateCondition(not process or #process ~= 43, msg, {
             Status = "400",
             Data = json.encode({
-                error = "BotProcess is required and must be a valid process id"
+                error = "Bot-Process is required and must be a valid process id"
             })
         })
     then
@@ -1801,28 +1700,20 @@ Handlers.add("Create-Bot", function(msg)
         return
     end
 
-    -- if publicBot then
-    --     publicBot = (publicBot == "true")
-    -- else
-    --     publicBot = true
-    -- end
-
-
-    -- SQLWrite("INSERT INTO bots (userId, botProcess, botName, botPfp, botPublic) VALUES (?, ?, ?, ?, ?)", userId,
-    --     botProcess, botName, botPfp, publicBot)
-    bots[botProcess] = {
-        userId = userId,
-        botProcess = botProcess,
-        botName = botName,
-        botPfp = botPfp,
-        botPublic = publicBot,
-        servers = {}
+    bots[process] = {
+        owner = userId,
+        process = process,
+        name = name,
+        pfp = pfp,
+        public = public,
+        servers = {},
+        description = description
     }
 
     msg.reply({
         Action = "Create-Bot-Response",
         Status = "200",
-        BotProcess = botProcess
+        BotProcess = process
     })
     SyncProcessState()
 end)
@@ -1831,7 +1722,10 @@ Handlers.add("Update-Bot", function(msg)
     local userId = msg.From
     userId = GetOriginalId(userId)
     local botId = VarOrNil(msg.Tags.BotProcess)
-    local publicBot = VarOrNil(msg.Tags.PublicBot)
+    local public = VarOrNil(msg.Tags.PublicBot)
+    local name = VarOrNil(msg.Tags.Name)
+    local pfp = VarOrNil(msg.Tags.Pfp)
+    local description = VarOrNil(msg.Tags.Description)
 
     if ValidateCondition(not botId, msg, {
             Status = "400",
@@ -1878,36 +1772,24 @@ Handlers.add("Update-Bot", function(msg)
         return
     end
 
-    if publicBot then
-        publicBot = (publicBot == "true")
-    end
-
-    local name = VarOrNil(msg.Tags.Name)
-    local pfp = VarOrNil(msg.Tags.Pfp)
 
     ao.send({
         Target = botId,
         Action = "Update-Bot",
         Tags = {
-            PublicBot = tostring(publicBot),
+            PublicBot = tostring(public),
             Name = name,
-            Pfp = pfp
+            Pfp = pfp,
+            Description = description
         }
     })
 
-    local updateResponse = Receive({ Action = "Update-Bot-Response", From = botId })
-    if ValidateCondition(updateResponse.Status ~= "200", msg, {
-            Status = "500",
-            Data = json.encode(updateResponse.Data)
-        }) then
-        return
-    end
-
     -- update bot in bots table
     -- SQLWrite("UPDATE bots SET botPublic = ?, botName = ?, botPfp = ? WHERE botProcess = ?", publicBot, name, pfp, botId)
-    bots[botId].botPublic = publicBot or bots[botId].botPublic
-    bots[botId].botName = name or bots[botId].botName
-    bots[botId].botPfp = pfp or bots[botId].botPfp
+    bots[botId].public = public or bots[botId].public
+    bots[botId].name = name or bots[botId].name
+    bots[botId].pfp = pfp or bots[botId].pfp
+    bots[botId].description = description or bots[botId].description
 
     msg.reply({
         Action = "Update-Bot-Response",

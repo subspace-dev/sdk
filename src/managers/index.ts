@@ -4,4 +4,4 @@ export { BotManager } from './bot';
 
 export type { Profile, Notification, Friend, DMMessage, DMResponse } from './user';
 export type { Server, Member, Channel, Category, Role, Message, MessagesResponse } from './server';
-export type { Bot, BotInfo } from './bot'; 
+export type { Bot } from './bot'; 

@@ -6,7 +6,7 @@ import { BotManager } from './managers/bot';
 // Re-export types for convenience
 export type { Profile, Notification, Friend, DMMessage, DMResponse } from './managers/user';
 export type { Server, Member, Channel, Category, Role, Message, MessagesResponse } from './managers/server';
-export type { Bot, BotInfo } from './managers/bot';
+export type { Bot } from './managers/bot';
 export type { Tag, MessageResult, AoSigner } from './types/ao';
 export type { ConnectionConfig } from './connection-manager';
 

@@ -1,4 +1,4 @@
-export type { Bot, BotInfo } from "../managers/bot";
+export type { Bot } from "../managers/bot";
 export type { Profile, Notification, Friend, DMMessage, DMResponse } from "../managers/user";
 export type { Server, Member, Channel, Category, Role, Message, MessagesResponse } from "../managers/server";
 export type { Tag, MessageResult, AoSigner } from "./ao";

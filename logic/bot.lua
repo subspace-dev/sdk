@@ -4,7 +4,7 @@ json = require("json")
 -- Subspace Bot Logic
 --
 -- Purpose:
--- - Maintain bot metadata (name, pfp, public visibility)
+-- - Maintain bot metadata (name and public visibility)
 -- - Join/leave servers when instructed by the Subspace coordinator
 -- - Track which servers the bot has joined/subscribed to
 -- - Relay/handle server-originated events (hook points for future logic)
@@ -19,9 +19,10 @@ json = require("json")
 
 Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
 Name = Name or "{NAME}"
+Description = Description or "{DESCRIPTION}"
 Pfp = Pfp or "{PFP}"
 PublicBot = PublicBot or ("{PUBLIC}" == "true")
-Version = Version or "1.0.0"
+Version_ = Version_ or "1.0.0"
 
 -- Membership and subscriptions are tracked as presence maps keyed by server id
 JoinedServers = JoinedServers or {}         -- { [serverId:string] = true }
@@ -55,7 +56,7 @@ end
 
 ----------------------------------------------------------------------------
 
--- Update bot’s public flag, name and pfp. Only Subspace can issue this.
+-- Update bot's public flag and name. Only Subspace can issue this.
 Handlers.add("Update-Bot", function(msg)
     assert(msg.From == Subspace, "❌[auth error] sender not authorized to update the bot")
 
@@ -66,16 +67,20 @@ Handlers.add("Update-Bot", function(msg)
 
     local name = VarOrNil(msg.Tags.Name)
     local pfp = VarOrNil(msg.Tags.Pfp)
+    local description = VarOrNil(msg.Tags.Description)
 
     -- Update in-memory bot metadata; omit fields that were not provided
     if publicBot ~= nil then PublicBot = publicBot end
     if name then Name = name end
+
     if pfp then Pfp = pfp end
+    if description then Description = description end
 
     msg.reply({
         Action = "Update-Bot-Response",
         Status = "200",
     })
+    SyncProcessState()
 end)
 
 ----------------------------------------------------------------------------
@@ -83,10 +88,11 @@ end)
 -- Push current bot state to Hyperbeam’s patch cache for fast external reads
 function SyncProcessState()
     local state = {
-        version = tostring(Version),
+        version = tostring(Version_),
         owner = Owner,
         name = Name,
         pfp = Pfp,
+        description = Description,
         publicBot = PublicBot,
         joinedServers = JoinedServers,
         subscribedServers = SubscribedServers,
@@ -97,6 +103,13 @@ function SyncProcessState()
         device = "patch@1.0",
         cache = { bot = state }
     })
+end
+
+InitialSync = InitialSync or true
+if InitialSync then
+    InitialSync = false
+    SyncProcessState()
+    print("✅ Bot initial sync complete")
 end
 
 ----------------------------------------------------------------------------
@@ -190,4 +203,6 @@ Handlers.add("Event-Message", function(msg)
     end
 
     -- Hook: implement bot behavior in response to server messages here
+    print("🔔 Event-Message from server", serverId)
+    SyncProcessState()
 end)
