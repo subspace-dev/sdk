@@ -551,27 +551,11 @@ export class ServerManager {
                 { name: "Channel-Id", value: params.channelId }
             ];
 
-            // console.log('🔧 SDK DEBUG: Processing params', {
-            //     name: params.name,
-            //     categoryId: params.categoryId,
-            //     categoryIdUndefined: params.categoryId === undefined,
-            //     categoryIdNotUndefined: params.categoryId !== undefined,
-            //     orderId: params.orderId,
-            //     allowMessaging: params.allowMessaging,
-            //     allowAttachments: params.allowAttachments
-            // });
-
             if (params.name) tags.push({ name: "Name", value: params.name });
             if (params.categoryId !== undefined) {
                 const categoryValue = params.categoryId || "";
-                // console.log('🔧 SDK DEBUG: Adding CategoryId tag', {
-                //     originalCategoryId: params.categoryId,
-                //     categoryValue,
-                //     categoryValueType: typeof categoryValue
-                // });
                 tags.push({ name: "Category-Id", value: categoryValue });
             } else {
-                // console.log('🔧 SDK DEBUG: CategoryId is undefined, skipping tag');
             }
             if (params.orderId !== undefined) tags.push({ name: "Order-Id", value: params.orderId.toString() });
             if (params.allowMessaging !== undefined) tags.push({ name: "Allow-Messaging", value: params.allowMessaging.toString() });
@@ -784,13 +768,7 @@ export class ServerManager {
             if (params.attachments) tags.push({ name: "Attachments", value: params.attachments });
             if (params.replyTo) tags.push({ name: "Reply-To", value: `${params.replyTo}` });
 
-            console.log("🔧 SDK DEBUG: Sending message", {
-                serverId,
-                channelId: params.channelId,
-                content: params.content,
-                attachments: params.attachments,
-                replyTo: params.replyTo
-            })
+
 
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
@@ -804,7 +782,6 @@ export class ServerManager {
             }
 
             // const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Send-Message-Response" });
-            // console.log("🔧 SDK DEBUG: Send-Message-Response", data)
             // return data?.Tags?.Status === "200";
         });
     }

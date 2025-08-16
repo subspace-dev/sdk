@@ -238,12 +238,6 @@ export class ConnectionManager {
             signer: this.getAoSigner(),
             tags,
         }
-
-        console.log("🔧 SDK DEBUG: Sending message", {
-            processId,
-            data,
-            tags
-        })
         const messageId: string = await this.ao.message(args)
 
         if (noResult) {
