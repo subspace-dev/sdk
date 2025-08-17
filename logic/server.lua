@@ -80,6 +80,7 @@ members = members or {}
 roles = roles or roles_default
 messages = messages or {}
 events = events or {}
+events_bak = events_bak or {}
 bots = bots or {}
 MemberCount = MemberCount or 0
 
@@ -681,6 +682,16 @@ local function GetNextChannelId()
     return tostring(maxId + 1)
 end
 
+function GetFirstItem(table)
+    local x, y
+    for a, b in pairs(table) do
+        x = a
+        y = b
+        break
+    end
+    return x, y
+end
+
 -- Push a snapshot of server state to Hyperbeam's patch cache for fast reads
 function SyncProcessState()
     -- This function is used to take all the possible data and couple it into
@@ -688,72 +699,112 @@ function SyncProcessState()
     -- Everything must be in a JSON like structure
     -- This function should be called everytime after a change is made to the server
 
-    EnsureEntityIds()
+
 
     -- loop over the events table and patch individual deleted items
-    for _, event in ipairs(events) do
-        if event.eventType == "DELETE" then
-            if event.targetTable == "categories" then
-                local categoryId = event.targetKey
-                Send({
-                    Target = ao.id,
-                    device = "patch@1.0",
-                    cache = { server = { serverinfo = { categories = { [categoryId] = nil } } } }
-                })
-            elseif event.targetTable == "channels" then
-                local channelId = event.targetKey
-                Send({
-                    Target = ao.id,
-                    device = "patch@1.0",
-                    cache = { server = { serverinfo = { channels = { [channelId] = nil } } } }
-                })
-            elseif event.targetTable == "roles" then
-                local roleId = event.targetKey
-                Send({
-                    Target = ao.id,
-                    device = "patch@1.0",
-                    cache = { server = { serverinfo = { roles = { [roleId] = nil } } } }
-                })
-            elseif event.targetTable == "messages" then
-                local channelId = event.baseKey
-                local messageId = event.targetKey
-                Send({
-                    Target = ao.id,
-                    device = "patch@1.0",
-                    cache = { server = { serverinfo = { messages = { [channelId] = { [messageId] = nil } } } } }
-                })
-            end
-        end
-    end
+    -- for _, event in ipairs(events) do
+    --     if event.eventType == "DELETE" then
+    --         if event.targetTable == "categories" then
+    --             -- do this so that the entry doesnot become an array {}->[]
+    --             -- local x, y = GetFirstItem(categories)
 
-    local state = {
-        serverinfo = {
-            name = Name,
-            logo = Logo,
-            description = Description,
-            owner = Owner,
-            publicServer = PublicServer,
-            version = Version_,
-            ticker = Ticker,
-            categories = categories,
-            channels = channels,
-            roles = roles,
-            memberCount = MemberCount,
-            bots = bots,
-            subscribedBots = SubscribedBots,
-        },
-        members = members,
-        roleMemberMapping = role_member_mapping,
-        messages = messages,
-        events = events,
-    }
+    --             local categoryId = event.targetKey
+    --             Send({
+    --                 Target = ao.id,
+    --                 device = "patch@1.0",
+    --                 cache = { server = { serverinfo = { categories = categories } } }
+    --             })
+    --         elseif event.targetTable == "channels" then
+    --             -- do this so that the entry doesnot become an array {}->[]
+    --             -- local x, y = GetFirstItem(channels)
+    --             -- local z, w = GetFirstItem(messages)
+
+    --             local channelId = event.targetKey
+    --             Send({
+    --                 Target = ao.id,
+    --                 device = "patch@1.0",
+    --                 cache = {
+    --                     server = {
+    --                         serverinfo = {
+    --                             channels = channels
+    --                         },
+    --                         messages = { [channelId] = messages[channelId] }
+    --                     }
+    --                 }
+    --             })
+    --         elseif event.targetTable == "roles" then
+    --             -- do this so that the entry doesnot become an array {}->[]
+    --             -- local x, y = GetFirstItem(roles)
+
+    --             local roleId = event.targetKey
+    --             Send({
+    --                 Target = ao.id,
+    --                 device = "patch@1.0",
+    --                 -- cache = { server = { serverinfo = { roles = { [roleId] = nil, [x] = y } } } }
+    --                 cache = { server = { serverinfo = { roles = { [roleId] = roles[roleId] } } } }
+    --             })
+    --         elseif event.targetTable == "messages" then
+    --             local channelId = event.baseKey
+    --             local messageId = event.targetKey
+
+    --             Send({
+    --                 Target = ao.id,
+    --                 device = "patch@1.0",
+    --                 -- cache = { server = { messages = { [channelId] = { [messageId] = nil, [x] = y } } } }
+    --                 cache = { server = { messages = { [channelId] = messages[channelId] } } }
+    --             })
+    --         end
+    --     end
+    -- end
+
+
 
     Send({
         Target = ao.id,
         device = "patch@1.0",
-        cache = { server = state }
+        cache = { server = nil }
+    })
+    Send({
+        Target = ao.id,
+        Action = "Sync"
     })
 end
+
+Handlers.add("Sync", function(msg)
+    if msg.From ~= ao.id then return end
+
+    EnsureEntityIds()
+
+    Send({
+        Target = ao.id,
+        device = "patch@1.0",
+        cache = {
+            server = {
+                serverinfo = {
+                    name = Name,
+                    logo = Logo,
+                    description = Description,
+                    owner = Owner,
+                    publicServer = PublicServer,
+                    version = Version_,
+                    ticker = Ticker,
+                    categories = categories,
+                    channels = channels,
+                    roles = roles,
+                    memberCount = MemberCount,
+                    bots = bots,
+                    subscribedBots = SubscribedBots,
+                },
+                members = members,
+                roleMemberMapping = role_member_mapping,
+                messages = messages,
+                events = events,
+            }
+        }
+    })
+    events_bak = events
+    events     = {}
+end)
 
 -- make sure state is synced on startup
 -- Ensure initial cache is populated on first boot
