@@ -690,6 +690,42 @@ function SyncProcessState()
 
     EnsureEntityIds()
 
+    -- loop over the events table and patch individual deleted items
+    for _, event in ipairs(events) do
+        if event.eventType == "DELETE" then
+            if event.targetTable == "categories" then
+                local categoryId = event.targetKey
+                Send({
+                    Target = ao.id,
+                    device = "patch@1.0",
+                    cache = { server = { serverinfo = { categories = { [categoryId] = nil } } } }
+                })
+            elseif event.targetTable == "channels" then
+                local channelId = event.targetKey
+                Send({
+                    Target = ao.id,
+                    device = "patch@1.0",
+                    cache = { server = { serverinfo = { channels = { [channelId] = nil } } } }
+                })
+            elseif event.targetTable == "roles" then
+                local roleId = event.targetKey
+                Send({
+                    Target = ao.id,
+                    device = "patch@1.0",
+                    cache = { server = { serverinfo = { roles = { [roleId] = nil } } } }
+                })
+            elseif event.targetTable == "messages" then
+                local channelId = event.baseKey
+                local messageId = event.targetKey
+                Send({
+                    Target = ao.id,
+                    device = "patch@1.0",
+                    cache = { server = { serverinfo = { messages = { [channelId] = { [messageId] = nil } } } } }
+                })
+            end
+        end
+    end
+
     local state = {
         serverinfo = {
             name = Name,
@@ -712,13 +748,6 @@ function SyncProcessState()
         events = events,
     }
 
-    Send({
-        Target = ao.id,
-        device = "patch@1.0",
-        cache = { server = { messages = nil } }
-    })
-
-    -- Special message to the patch device which will update the cache in hyperbeam nodes
     Send({
         Target = ao.id,
         device = "patch@1.0",
@@ -1069,6 +1098,12 @@ Handlers.add("Delete-Category", function(msg)
     ResequenceCategories()
     ResequenceChannels(nil) -- Resequence uncategorized channels
 
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = "categories",
+        targetKey = categoryId,
+    })
+
     msg.reply({
         Action = "Delete-Category-Response",
         Status = "200"
@@ -1372,6 +1407,12 @@ Handlers.add("Delete-Channel", function(msg)
 
     -- Resequence channels in the affected category
     ResequenceChannels(channel_categoryId)
+
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = "channels",
+        targetKey = channelId,
+    })
 
     msg.reply({
         Action = "Delete-Channel-Response",
@@ -1678,6 +1719,12 @@ Handlers.add("Delete-Role", function(msg)
 
     -- Resequence roles to fill the gap
     ResequenceRoles()
+
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = "roles",
+        targetKey = roleId,
+    })
 
     msg.reply({
         Action = "Delete-Role-Response",
@@ -2516,6 +2563,13 @@ Handlers.add("Delete-Message", function(msg)
     if messages[channelId] then
         messages[channelId][messageId] = nil
     end
+
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = "messages",
+        baseKey = channelId,
+        targetKey = messageId,
+    })
 
     msg.reply({
         Action = "Delete-Message-Response",
