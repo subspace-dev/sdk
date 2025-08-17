@@ -120,26 +120,52 @@ export class UserManager {
         });
     }
 
-    async getBulkProfiles(userIds: string[]): Promise<Profile[]> {
-        return loggedAction('🔍 getting bulk profiles', { userCount: userIds.length }, async () => {
-            const profiles = await this.connectionManager.hashpathGET<Record<string, any>>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/~json@1.0/serialize`)
-            const profilesArray: Profile[] = []
-            for (const userId of userIds) {
-                const profile = profiles[userId]
-                profilesArray.push(profile)
-            }
-            return profilesArray
-            // const res = await this.connectionManager.dryrun({
-            //     processId: Constants.Subspace,
-            //     tags: [
-            //         { name: "Action", value: Constants.Actions.GetBulkProfile },
-            //         { name: "User-Ids", value: JSON.stringify(userIds) }
-            //     ]
-            // });
+    /**
+     * Fetch multiple user profiles in batches with rate limiting
+     * @param userIds Array of user IDs to fetch profiles for
+     * @param batchSize Number of profiles to fetch concurrently (default: 10)
+     * @param batchDelay Delay between batches in milliseconds (default: 500)
+     * @returns Record mapping userId to Profile or null if failed
+     */
+    async getBulkProfiles(userIds: string[], batchSize: number = 10, batchDelay: number = 500): Promise<Record<string, Profile | null>> {
+        return loggedAction('📦 getting bulk profiles', { userIds, count: userIds.length, batchSize, batchDelay }, async () => {
+            const results: Record<string, Profile | null> = {}
 
-            // const data = JSON.parse(this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Get-Bulk-Profile-Response" }).Data);
-            // return data || [];
-        });
+            for (let i = 0; i < userIds.length; i += batchSize) {
+                const batch = userIds.slice(i, i + batchSize)
+                const batchNumber = Math.floor(i / batchSize) + 1
+                const totalBatches = Math.ceil(userIds.length / batchSize)
+
+                console.log(`📦 Fetching batch ${batchNumber}/${totalBatches} (${batch.length} profiles)`)
+
+                // Fetch all profiles in current batch concurrently
+                const batchPromises = batch.map(async (userId) => {
+                    try {
+                        const profile = await this.getProfile(userId)
+                        return { userId, profile }
+                    } catch (error) {
+                        console.error(`❌ Failed to fetch profile for ${userId}:`, error)
+                        return { userId, profile: null }
+                    }
+                })
+
+                const batchResults = await Promise.all(batchPromises)
+
+                // Store results in key-value format
+                batchResults.forEach(({ userId, profile }) => {
+                    results[userId] = profile
+                })
+
+                console.log(`✅ Batch ${batchNumber}/${totalBatches} completed (${batchResults.filter(r => r.profile).length}/${batch.length} successful)`)
+
+                // Add delay between batches (except for the last batch)
+                if (i + batchSize < userIds.length) {
+                    await new Promise(resolve => setTimeout(resolve, batchDelay))
+                }
+            }
+
+            return results
+        })
     }
 
     async createProfile(): Promise<string | null> {
@@ -536,5 +562,53 @@ export class UserManager {
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Remove-All-Delegations-Response" });
             return data?.Tags?.Status === "200";
         });
+    }
+
+    /**
+     * Fetch multiple user profiles for primary names in batches with rate limiting
+     * @param userIds Array of user IDs to fetch profiles for
+     * @param batchSize Number of profiles to fetch concurrently (default: 10)
+     * @param batchDelay Delay between batches in milliseconds (default: 220)
+     * @returns Record mapping userId to Profile or null if failed
+     */
+    async getBulkPrimaryNames(userIds: string[], batchSize: number = 10, batchDelay: number = 220): Promise<Record<string, Profile | null>> {
+        return loggedAction('🏷️ getting bulk primary names', { userIds, count: userIds.length, batchSize, batchDelay }, async () => {
+            const results: Record<string, Profile | null> = {}
+
+            for (let i = 0; i < userIds.length; i += batchSize) {
+                const batch = userIds.slice(i, i + batchSize)
+                const batchNumber = Math.floor(i / batchSize) + 1
+                const totalBatches = Math.ceil(userIds.length / batchSize)
+
+                console.log(`🏷️ Fetching primary names batch ${batchNumber}/${totalBatches} (${batch.length} profiles)`)
+
+                // Fetch all profiles in current batch concurrently
+                const batchPromises = batch.map(async (userId) => {
+                    try {
+                        const profile = await this.getProfile(userId)
+                        return { userId, profile }
+                    } catch (error) {
+                        console.error(`❌ Failed to fetch primary name for ${userId}:`, error)
+                        return { userId, profile: null }
+                    }
+                })
+
+                const batchResults = await Promise.all(batchPromises)
+
+                // Store results in key-value format
+                batchResults.forEach(({ userId, profile }) => {
+                    results[userId] = profile
+                })
+
+                console.log(`✅ Primary names batch ${batchNumber}/${totalBatches} completed (${batchResults.filter(r => r.profile).length}/${batch.length} successful)`)
+
+                // Add delay between batches (except for the last batch)
+                if (i + batchSize < userIds.length) {
+                    await new Promise(resolve => setTimeout(resolve, batchDelay))
+                }
+            }
+
+            return results
+        })
     }
 } 
