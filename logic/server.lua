@@ -712,6 +712,12 @@ function SyncProcessState()
         events = events,
     }
 
+    Send({
+        Target = ao.id,
+        device = "patch@1.0",
+        cache = { server = { messages = nil } }
+    })
+
     -- Special message to the patch device which will update the cache in hyperbeam nodes
     Send({
         Target = ao.id,
