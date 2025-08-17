@@ -19,6 +19,7 @@ export const Constants = {
         UpdateProfile: 'Update-Profile',
         GetOriginalId: 'Get-Original-Id',
         GetNotifications: 'Get-Notifications',
+        ApproveJoinServer: 'Approve-Join-Server',
         JoinServer: 'Join-Server',
         LeaveServer: 'Leave-Server',
         // Friend actions

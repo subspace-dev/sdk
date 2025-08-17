@@ -15,6 +15,16 @@ export interface Bot {
     version: string; // bot process code version
 }
 
+export interface ServerBot {
+    userId: string;
+    nickname?: string;
+    roles: string[];
+    joinedAt: string;
+    approved: boolean;
+    process: string;
+    isBot: true;
+}
+
 export class BotManager {
     constructor(private connectionManager: ConnectionManager) { }
 
@@ -176,6 +186,20 @@ export class BotManager {
             }
 
             return result;
+        });
+    }
+
+    async getServerBot(serverId: string, botId: string): Promise<ServerBot | null> {
+        return loggedAction('🔍 getting server bot', { serverId, botId }, async () => {
+            const res = await this.connectionManager.hashpathGET<ServerBot>(`${serverId}~process@1.0/now/cache/server/serverinfo/bots/${botId}/~json@1.0/serialize`);
+            return res;
+        });
+    }
+
+    async getAllServerBots(serverId: string): Promise<Record<string, ServerBot>> {
+        return loggedAction('🔍 getting all server bots', { serverId }, async () => {
+            const res = await this.connectionManager.hashpathGET<Record<string, ServerBot>>(`${serverId}~process@1.0/now/cache/server/serverinfo/bots/~json@1.0/serialize`);
+            return res;
         });
     }
 

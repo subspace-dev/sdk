@@ -12,6 +12,7 @@ export declare const Constants: {
         UpdateProfile: string;
         GetOriginalId: string;
         GetNotifications: string;
+        ApproveJoinServer: string;
         JoinServer: string;
         LeaveServer: string;
         SendFriendRequest: string;

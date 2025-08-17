@@ -2,6 +2,7 @@ import { ConnectionManager } from "../connection-manager";
 import { Constants } from "../utils/constants";
 import { loggedAction } from "../utils/logger";
 import type { Tag } from "../types/ao";
+import { ServerBot } from "./bot";
 
 export interface Server {
     serverId: string;
@@ -12,7 +13,7 @@ export interface Server {
     version?: string;
     memberCount: number;
     members?: Record<string, Member>;
-    bots?: Record<string, { approved: boolean; process: string }>; // botId -> bot info
+    bots?: Record<string, ServerBot>; // botId -> bot info
     channels: Record<string, Channel>;
     categories: Record<string, Category>;
     roles: Record<string, Role>; // roleId -> role
@@ -163,7 +164,7 @@ export class ServerManager {
             // Prefer reading patched state from hyperbeam cache
             let info: any | null = null;
             let mappingTopLevel: Record<string, Record<string, boolean>> = {};
-            let serverBots: Record<string, { approved: boolean; process: string }> = {};
+            let serverBots: Record<string, ServerBot> = {};
 
             try {
                 info = await this.connectionManager.hashpathGET<any>(`${serverId}~process@1.0/now/cache/server/serverinfo/~json@1.0/serialize`)
@@ -183,7 +184,7 @@ export class ServerManager {
 
             // Fetch server bots
             try {
-                const bots = await this.connectionManager.hashpathGET<Record<string, { approved: boolean; process: string }>>(`${serverId}~process@1.0/now/cache/server/serverinfo/bots/~json@1.0/serialize`);
+                const bots = await this.connectionManager.hashpathGET<Record<string, ServerBot>>(`${serverId}~process@1.0/now/cache/server/serverinfo/bots/~json@1.0/serialize`);
                 if (bots && typeof bots === 'object') {
                     serverBots = bots;
                 }

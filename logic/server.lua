@@ -169,16 +169,22 @@ Permissions = {
 --     return originalId
 -- end
 
+function IsMemberBot(userId)
+    return bots[userId] ~= nil
+end
+
 -- Return a copy of member with roles resolved to role objects (non-mutating)
 function GetMember(userId)
     -- Return a copy with roles resolved to role objects; do not mutate stored state
-    local stored = members[userId]
+    local stored = IsMemberBot(userId) and bots[userId] or members[userId]
     if not stored then return nil end
     local copy = {
-        userId = stored.userId,
+        userId = stored.userId or userId,
+        process = stored.process,
         nickname = stored.nickname,
         joinedAt = stored.joinedAt,
-        roles = {}
+        roles = {},
+        isBot = IsMemberBot(userId)
     }
     for _, roleId in ipairs(stored.roles or {}) do
         local role = GetRole(roleId)
@@ -188,6 +194,68 @@ function GetMember(userId)
         return (a.orderId or 0) < (b.orderId or 0)
     end)
     return copy
+end
+
+-- Sanitize member data before storage - keep only raw data
+function SanitizeMemberData(memberData)
+    if not memberData then return nil end
+
+    local sanitized = {
+        userId = memberData.userId,
+        nickname = memberData.nickname,
+        joinedAt = memberData.joinedAt,
+        roles = {}
+    }
+
+    -- Ensure roles is an array of role IDs only (not role objects)
+    if memberData.roles then
+        for _, roleData in ipairs(memberData.roles) do
+            if type(roleData) == "string" then
+                -- Already a role ID string
+                table.insert(sanitized.roles, roleData)
+            elseif type(roleData) == "table" and roleData.roleId then
+                -- Role object, extract the roleId
+                table.insert(sanitized.roles, tostring(roleData.roleId))
+            end
+        end
+    end
+
+    -- For bots, also preserve additional bot-specific fields
+    if memberData.process then
+        sanitized.process = memberData.process
+        sanitized.approved = memberData.approved
+    end
+
+    return sanitized
+end
+
+-- Helper function to get the appropriate table and update role mapping
+function UpdateMemberTable(userId, memberData)
+    -- Sanitize the member data before storing to ensure clean storage
+    local sanitizedData = SanitizeMemberData(memberData)
+
+    if IsMemberBot(userId) then
+        bots[userId] = sanitizedData
+    else
+        members[userId] = sanitizedData
+    end
+end
+
+-- Helper function to remove from appropriate table and role mapping
+function RemoveMemberFromTables(userId)
+    local memberData = IsMemberBot(userId) and bots[userId] or members[userId]
+    local rolesList = memberData and memberData.roles
+
+    -- Remove from role mapping
+    RemoveUserFromAllRoleMappings(userId, rolesList)
+
+    -- Remove from appropriate table
+    if IsMemberBot(userId) then
+        bots[userId] = nil
+        SubscribedBots[userId] = nil -- Also remove from subscriptions if it's a bot
+    else
+        members[userId] = nil
+    end
 end
 
 function RoleHasPermission(role, permission)
@@ -332,6 +400,7 @@ function EnsureAllMembersHaveDefaultRole()
 
     local membersUpdated = 0
 
+    -- Update regular members
     for memberId, member in pairs(members) do
         local hasDefault = false
         local existing = member.roles or {}
@@ -345,9 +414,35 @@ function EnsureAllMembersHaveDefaultRole()
             local newRoles = { "1" }
             for _, rid in ipairs(existing) do table.insert(newRoles, rid) end
             member.roles = newRoles
+            -- Update the sanitized version in storage
+            UpdateMemberTable(memberId, member)
             -- reflect in mapping
             AddUserToRoleMapping("1", memberId)
             membersUpdated = membersUpdated + 1
+        end
+    end
+
+    -- Update bots
+    for botId, bot in pairs(bots) do
+        if bot.approved then -- Only update approved bots
+            local hasDefault = false
+            local existing = bot.roles or {}
+            for _, rid in ipairs(existing) do
+                if tostring(rid) == "1" then
+                    hasDefault = true
+                    break
+                end
+            end
+            if not hasDefault then
+                local newRoles = { "1" }
+                for _, rid in ipairs(existing) do table.insert(newRoles, rid) end
+                bot.roles = newRoles
+                -- Update the sanitized version in storage
+                UpdateMemberTable(botId, bot)
+                -- reflect in mapping
+                AddUserToRoleMapping("1", botId)
+                membersUpdated = membersUpdated + 1
+            end
         end
     end
 
@@ -358,11 +453,25 @@ end
 -- Rebuild role_member_mapping from scratch
 local function RebuildRoleMemberMapping()
     role_member_mapping = {}
+
+    -- Add regular members
     for memberId, member in pairs(members) do
         local list = member and member.roles or {}
         if list then
             for _, rid in ipairs(list) do
                 AddUserToRoleMapping(rid, memberId)
+            end
+        end
+    end
+
+    -- Add bots
+    for botId, bot in pairs(bots) do
+        if bot.approved then -- Only include approved bots
+            local list = bot and bot.roles or {}
+            if list then
+                for _, rid in ipairs(list) do
+                    AddUserToRoleMapping(rid, botId)
+                end
             end
         end
     end
@@ -652,7 +761,7 @@ Handlers.add("Join-Server", function(msg)
         joinedAt = joinedAt,
         roles = { "1" } -- default role
     }
-    members[userId] = member
+    UpdateMemberTable(userId, member)
     -- update role mapping for default role
     AddUserToRoleMapping("1", userId)
     -- Increment member counter
@@ -663,6 +772,16 @@ Handlers.add("Join-Server", function(msg)
         Status = "200",
     })
     SyncProcessState()
+
+    -- Notify Subspace that user successfully joined (after state sync)
+    ao.send({
+        Target = Subspace,
+        Action = "User-Joined-Server",
+        Tags = {
+            ["User-Id"] = userId,
+            ["Server-Approved"] = "true"
+        }
+    })
 end)
 
 -- Remove a member from the server (cannot remove the owner)
@@ -689,9 +808,9 @@ Handlers.add("Leave-Server", function(msg)
         return
     end
 
-    -- remove user from role mapping
-    RemoveUserFromAllRoleMappings(userId, members[userId] and members[userId].roles)
-    members[userId] = nil
+    -- Remove from appropriate table and role mapping
+    RemoveMemberFromTables(userId)
+
     -- Decrement member counter
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
     msg.reply({
@@ -1243,11 +1362,7 @@ Handlers.add("Delete-Channel", function(msg)
     messages[tostring(channelId)] = nil
 
     -- Delete the channel
-    if storageKey ~= nil then
-        channels[storageKey] = nil
-    else
-        channels[tostring(channelId)] = nil
-    end
+    channels[tostring(channelId)] = nil
 
     -- Resequence channels in the affected category
     ResequenceChannels(channel_categoryId)
@@ -1535,6 +1650,8 @@ Handlers.add("Delete-Role", function(msg)
                 if rid ~= roleId then table.insert(newRoles, rid) end
             end
             member.roles = newRoles
+            -- Update the sanitized version in storage
+            UpdateMemberTable(memberId, member)
         end
     end
     -- clear mapping for this role
@@ -1652,7 +1769,8 @@ Handlers.add("Update-Member", function(msg)
         targetMember.nickname = nicknameValue
     end
 
-    members[actualTargetId] = targetMember
+    -- Update the appropriate table (members or bots)
+    UpdateMemberTable(actualTargetId, targetMember)
 
     msg.reply({
         Action = "Update-Member-Response",
@@ -1706,10 +1824,9 @@ Handlers.add("Kick-Member", function(msg)
         return
     end
 
+    -- Remove from appropriate table and role mapping
+    RemoveMemberFromTables(targetUserId)
 
-    -- cleanup role mapping for the user
-    RemoveUserFromAllRoleMappings(targetUserId, members[targetUserId] and members[targetUserId].roles)
-    members[targetUserId] = nil
     -- Decrement member counter for removed member
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
 
@@ -1723,6 +1840,14 @@ Handlers.add("Kick-Member", function(msg)
             Reason = reason or "Kicked"
         }
     })
+
+    -- If it's a bot, also notify the bot process
+    if IsMemberBot(targetUserId) then
+        ao.send({
+            Target = targetUserId,
+            Action = "Remove-Bot",
+        })
+    end
 
     msg.reply({
         Action = "Kick-Member-Response",
@@ -1780,9 +1905,9 @@ Handlers.add("Ban-Member", function(msg)
         return
     end
 
-    -- cleanup role mapping for the user
-    RemoveUserFromAllRoleMappings(targetUserId, members[targetUserId] and members[targetUserId].roles)
-    members[targetUserId] = nil
+    -- Remove from appropriate table and role mapping
+    RemoveMemberFromTables(targetUserId)
+
     -- Decrement member counter for removed member
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
 
@@ -1795,6 +1920,14 @@ Handlers.add("Ban-Member", function(msg)
             Reason = reason or "Banned"
         }
     })
+
+    -- If it's a bot, also notify the bot process
+    if IsMemberBot(targetUserId) then
+        ao.send({
+            Target = targetUserId,
+            Action = "Remove-Bot",
+        })
+    end
 
     msg.reply({
         Action = "Ban-Member-Response",
@@ -1947,9 +2080,14 @@ Handlers.add("Assign-Role", function(msg)
         return
     end
 
-    -- Assign the role
-    members[targetUserId].roles = members[targetUserId].roles or {}
-    table.insert(members[targetUserId].roles, roleId)
+    -- Assign the role to the appropriate table
+    local targetData = IsMemberBot(targetUserId) and bots[targetUserId] or members[targetUserId]
+    targetData.roles = targetData.roles or {}
+    table.insert(targetData.roles, roleId)
+
+    -- Update the appropriate table
+    UpdateMemberTable(targetUserId, targetData)
+
     -- Update mapping
     AddUserToRoleMapping(roleId, targetUserId)
 
@@ -2069,12 +2207,17 @@ Handlers.add("Unassign-Role", function(msg)
         return
     end
 
-    -- Remove the role (by value)
+    -- Remove the role (by value) from the appropriate table
+    local targetData = IsMemberBot(targetUserId) and bots[targetUserId] or members[targetUserId]
     local newRoles = {}
-    for _, rid in ipairs(members[targetUserId].roles or {}) do
+    for _, rid in ipairs(targetData.roles or {}) do
         if rid ~= roleId then table.insert(newRoles, rid) end
     end
-    members[targetUserId].roles = newRoles
+    targetData.roles = newRoles
+
+    -- Update the appropriate table
+    UpdateMemberTable(targetUserId, targetData)
+
     -- Update mapping
     RemoveUserFromRoleMapping(roleId, targetUserId)
 
@@ -2399,6 +2542,70 @@ end
 -- Initialize database and validate permissions
 ValidateExistingRolePermissions()
 
+-- Clean up any contaminated member data (resolve role objects back to IDs)
+function CleanupContaminatedMemberData()
+    local cleanedCount = 0
+
+    -- Clean members table
+    for memberId, member in pairs(members) do
+        local needsCleaning = false
+
+        -- Check if roles contains objects instead of strings
+        if member.roles then
+            for _, roleData in ipairs(member.roles) do
+                if type(roleData) == "table" then
+                    needsCleaning = true
+                    break
+                end
+            end
+        end
+
+        -- Check if isBot property exists (should not be in storage)
+        if member.isBot ~= nil then
+            needsCleaning = true
+        end
+
+        if needsCleaning then
+            UpdateMemberTable(memberId, member)
+            cleanedCount = cleanedCount + 1
+        end
+    end
+
+    -- Clean bots table
+    for botId, bot in pairs(bots) do
+        local needsCleaning = false
+
+        -- Check if roles contains objects instead of strings
+        if bot.roles then
+            for _, roleData in ipairs(bot.roles) do
+                if type(roleData) == "table" then
+                    needsCleaning = true
+                    break
+                end
+            end
+        end
+
+        -- Check if isBot property exists (should not be in storage)
+        if bot.isBot ~= nil then
+            needsCleaning = true
+        end
+
+        if needsCleaning then
+            UpdateMemberTable(botId, bot)
+            cleanedCount = cleanedCount + 1
+        end
+    end
+
+    if cleanedCount > 0 then
+        print("Cleaned up " .. cleanedCount .. " contaminated member/bot records")
+    end
+
+    return cleanedCount
+end
+
+-- Clean up any existing contaminated data
+CleanupContaminatedMemberData()
+
 -- Ensure all existing members have the default role
 EnsureAllMembersHaveDefaultRole()
 -- Ensure mapping is consistent at startup
@@ -2407,7 +2614,14 @@ RebuildRoleMemberMapping()
 -- Initialize MemberCount once at startup based on current state
 local function InitializeMemberCount()
     local count = 0
+    -- Count regular members
     for _ in pairs(members) do count = count + 1 end
+    -- Count approved bots
+    for _, bot in pairs(bots) do
+        if bot.approved then
+            count = count + 1
+        end
+    end
     MemberCount = count
 end
 InitializeMemberCount()
@@ -2675,8 +2889,20 @@ Handlers.add("Approve-Add-Bot", function(msg)
         return
     end
 
+    -- A bot is like a regular member, but with a special process id, and stored in a different table
+    -- This is because bots are not real users, and we don't want to store them in the members table
     bot.approved = true
-    bots[botProcess] = bot
+    bot.nickname = ""       -- blank nickname, show default bot name
+    bot.roles = { "1" }     -- default role id
+    bot.joinedAt = msg.Timestamp
+    bot.userId = botProcess -- Set userId for consistency with member structure
+    UpdateMemberTable(botProcess, bot)
+
+    -- Update role mapping for default role
+    AddUserToRoleMapping("1", botProcess)
+
+    -- Increment member counter
+    MemberCount = MemberCount + 1
 
     msg.reply({
         Action = "Approve-Add-Bot-Response",
@@ -2747,9 +2973,11 @@ Handlers.add("Remove-Bot", function(msg)
         return
     end
 
-    -- remove bot from server
-    bots[botProcess] = nil
-    SubscribedBots[botProcess] = nil
+    -- Remove bot from server using helper function
+    RemoveMemberFromTables(botProcess)
+
+    -- Decrement member counter
+    if MemberCount > 0 then MemberCount = MemberCount - 1 end
 
     -- tell subspace and bot process that bot has been removed
     ao.send({

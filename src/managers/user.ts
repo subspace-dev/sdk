@@ -432,9 +432,25 @@ export class UserManager {
         });
     }
 
+    async approveJoinServer(serverId: string): Promise<boolean> {
+        return loggedAction('✅ approving join server (user)', { serverId }, async () => {
+            // Send approve join request to the subspace process (Step 1)
+            const res = await this.connectionManager.sendMessage({
+                processId: Constants.Subspace,
+                tags: [
+                    { name: "Action", value: Constants.Actions.ApproveJoinServer },
+                    { name: "Server-Id", value: serverId }
+                ]
+            });
+
+            const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Approve-Join-Server-Response" });
+            return data?.Tags?.Status === "200";
+        });
+    }
+
     async joinServer(serverId: string): Promise<boolean> {
         return loggedAction('➡️ joining server (user)', { serverId }, async () => {
-            // Send join request directly to the server process
+            // Send join request directly to the server process (Step 2)
             const res = await this.connectionManager.sendMessage({
                 processId: serverId,
                 tags: [
@@ -444,6 +460,24 @@ export class UserManager {
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Join-Server-Response" });
             return data?.Tags.Status === "200";
+        });
+    }
+
+    async joinServerWithApproval(serverId: string): Promise<boolean> {
+        return loggedAction('🔄 joining server with approval (user)', { serverId }, async () => {
+            // Step 1: Approve join request in Subspace
+            const approvalSuccess = await this.approveJoinServer(serverId);
+            if (!approvalSuccess) {
+                throw new Error('Failed to approve join server request');
+            }
+
+            // Step 2: Send join request to the server
+            const joinSuccess = await this.joinServer(serverId);
+            if (!joinSuccess) {
+                throw new Error('Failed to join server after approval');
+            }
+
+            return true;
         });
     }
 
