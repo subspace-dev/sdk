@@ -107,12 +107,12 @@ export class BotManager {
     async getBot(botId: string): Promise<Bot | null> {
         return loggedAction('🔍 getting bot info', { botId }, async () => {
             // Get bot's own state from its process
-            let botprocessBotData: any | null = null;
-            try {
-                botprocessBotData = await this.connectionManager.hashpathGET<any>(`${botId}~process@1.0/now/cache/bot/~json@1.0/serialize`)
-            } catch (_) {
-                botprocessBotData = null;
-            }
+            // let botprocessBotData: any | null = null;
+            // try {
+            //     botprocessBotData = await this.connectionManager.hashpathGET<any>(`${botId}~process@1.0/now/cache/bot/~json@1.0/serialize`)
+            // } catch (_) {
+            //     botprocessBotData = null;
+            // }
 
             // Get bot metadata from Subspace process
             let subspaceBotData: any | null = null;
@@ -122,23 +122,31 @@ export class BotManager {
                 subspaceBotData = null;
             }
 
+            console.log('subspaceBotData', subspaceBotData);
+
             // @ts-ignore
             const botInfo: Bot = {};
 
-            if (botprocessBotData) {
-                botInfo.public = botprocessBotData.publicBot || false;
-                botInfo.joinedServers = botprocessBotData.joinedServers || {};
-                botInfo.subscribedServers = botprocessBotData.subscribedServers || {};
-                botInfo.name = botprocessBotData?.name || 'Unknown Bot';
-                botInfo.pfp = botprocessBotData?.pfp;
-                botInfo.description = botprocessBotData?.description;
-                botInfo.version = botprocessBotData?.version || 'unknown';
-                botInfo.owner = botprocessBotData?.owner || '';
-                botInfo.process = botId;
-            }
+            // if (botprocessBotData) {
+            //     botInfo.public = botprocessBotData.publicBot || false;
+            //     botInfo.joinedServers = botprocessBotData.joinedServers || {};
+            //     botInfo.subscribedServers = botprocessBotData.subscribedServers || {};
+            //     botInfo.name = botprocessBotData?.name || 'Unknown Bot';
+            //     botInfo.pfp = botprocessBotData?.pfp;
+            //     botInfo.description = botprocessBotData?.description;
+            //     botInfo.version = botprocessBotData?.version || 'unknown';
+            //     botInfo.owner = botprocessBotData?.owner || '';
+            //     botInfo.process = botId;
+            // }
             if (subspaceBotData) {
                 // Subspace data can override some fields if available
+                botInfo.name = subspaceBotData.name || botInfo.name;
                 botInfo.owner = subspaceBotData.owner || botInfo.owner;
+                botInfo.pfp = subspaceBotData.pfp || botInfo.pfp;
+                botInfo.description = subspaceBotData.description || botInfo.description;
+                botInfo.process = botId;
+                botInfo.public = subspaceBotData.public || false;
+                botInfo.joinedServers = subspaceBotData.servers || {};
             }
             return botInfo;
         });

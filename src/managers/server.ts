@@ -356,7 +356,6 @@ export class ServerManager {
             const result: Record<string, Member> = {};
             if (members) {
                 Object.entries(members).forEach(([uid, raw]) => {
-                    console.log('Debug - raw member:', uid, raw)
                     if (!raw) return;
                     result[uid] = {
                         userId: raw.userId || uid,
