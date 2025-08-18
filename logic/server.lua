@@ -128,7 +128,7 @@ end
 -- legacy sqlite schema removed
 
 -- legacy default DB bootstrap comments removed
-SubscribedBots = {}
+SubscribedBots = SubscribedBots or {}
 
 Permissions = {
     SEND_MESSAGES = 1 << 0,    -- 1
@@ -902,6 +902,14 @@ Handlers.add("Leave-Server", function(msg)
 
     -- Decrement member counter
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
+
+    -- Add DELETE event for state patching
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = "members",
+        targetKey = userId,
+    })
+
     msg.reply({
         Action = "Leave-Server-Response",
         Status = "200",
@@ -1956,6 +1964,13 @@ Handlers.add("Kick-Member", function(msg)
         })
     end
 
+    -- Add DELETE event for state patching
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = IsMemberBot(targetUserId) and "bots" or "members",
+        targetKey = targetUserId,
+    })
+
     msg.reply({
         Action = "Kick-Member-Response",
         Status = "200",
@@ -2017,6 +2032,13 @@ Handlers.add("Ban-Member", function(msg)
 
     -- Decrement member counter for removed member
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
+
+    -- Add DELETE event for state patching
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = IsMemberBot(targetUserId) and "bots" or "members",
+        targetKey = targetUserId,
+    })
 
     ao.send({
         Target = Subspace,
@@ -2306,12 +2328,12 @@ Handlers.add("Unassign-Role", function(msg)
         end
     end
     if ValidateCondition(not hasRole, msg, {
-            Status = "400",
+            Status = "200",
             Data = json.encode({
                 error = "User does not have this role"
             })
         }) then
-        return
+        -- return
     end
 
     -- Remove the role (by value) from the appropriate table
@@ -2327,6 +2349,13 @@ Handlers.add("Unassign-Role", function(msg)
 
     -- Update mapping
     RemoveUserFromRoleMapping(roleId, targetUserId)
+
+    -- table.insert(events, {
+    --     eventType = "UNASSIGN",
+    --     targetTable = "members",
+    --     baseKey = targetUserId,
+    --     targetKey = roleId,
+    -- })
 
     msg.reply({
         Action = "Unassign-Role-Response",
@@ -2359,14 +2388,7 @@ Handlers.add("Send-Message", function(msg)
     local replyTo = VarOrNil(msg.Tags["Reply-To"])
     local timestamp = tonumber(msg.Timestamp or os.time())
     local messageTxId = msg.Id
-
-    print(msg)
-    debug_msg = msg
-
-    debug_chn_id = channelId
     if channelId then channelId = tostring(channelId) end
-    debug_chn_id_parsed = channelId
-
     if ValidateCondition(not channelId, msg, {
             Status = "400",
             Data = json.encode({
@@ -2388,7 +2410,6 @@ Handlers.add("Send-Message", function(msg)
     end
 
     local channel = GetChannel(channelId)
-    print(channel)
     if ValidateCondition(not channel, msg, {
             Status = "400",
             Data = json.encode({
@@ -2435,37 +2456,24 @@ Handlers.add("Send-Message", function(msg)
         replyTo = replyTo
     }
 
-    -- Extract mentions from content and send notification messages
-    local mentions = ExtractMentions(content)
-    for _, mentionedUserId in ipairs(mentions) do
-        -- Check if the mentioned user is a member of this server
-        local mentionedMember = GetMember(mentionedUserId)
-        if mentionedMember then
-            ao.send({
-                Target = Subspace,
-                Action = "Add-Notification",
-                Tags = {
-                    ["Server-Or-Dm-Id"] = ao.id,
-                    ["From-User-Id"] = userId,
-                    ["For-User-Id"] = mentionedUserId,
-                    Source = "SERVER",
-                    ["Channel-Id"] = tostring(channelId),
-                    ["Server-Name"] = Name,
-                    ["Server-Logo"] = Logo,
-                    ["Channel-Name"] = channel.name,
-                    ["Author-Name"] = member.nickname,
-                    ["Message-Tx-Id"] = messageTxId,
-                    Timestamp = tostring(timestamp),
-                }
-            })
-        end
-    end
-
     msg.reply({
         Action = "Send-Message-Response",
         Status = "200",
     })
     SyncProcessState()
+
+    msg.forward(ao.id, {
+        Action = "Push-To-Bots",
+        Tags = {
+            ["X-Id"] = tostring(msg.Id),
+            ["X-Timestamp"] = tostring(timestamp),
+            ["X-Channel-Id"] = tostring(channelId),
+            ["X-Author-Id"] = tostring(userId),
+            ["X-Attachments"] = tostring(attachments or ""),
+            ["X-Reply-To"] = tostring(replyTo or ""),
+            ["X-Event-Type"] = "MESSAGE_SENT"
+        }
+    })
 end)
 
 Handlers.add("Edit-Message", function(msg)
@@ -2543,6 +2551,22 @@ Handlers.add("Edit-Message", function(msg)
     message.content = content
     message.edited = 1
 
+    -- Forward message edit to all subscribed bots
+    msg.forward(ao.id, {
+        Action = "Push-To-Bots",
+        Data = content,
+        Tags = {
+            ["X-Id"] = tostring(messageId),
+            ["X-Timestamp"] = tostring(message.timestamp),
+            ["X-Channel-Id"] = tostring(channelId),
+            ["X-Author-Id"] = tostring(message.authorId),
+            ["X-Attachments"] = tostring(message.attachments or ""),
+            ["X-Reply-To"] = tostring(message.replyTo or ""),
+            ["X-Event-Type"] = "MESSAGE_EDITED",
+            ["X-Editor-Id"] = tostring(userId)
+        }
+    })
+
     msg.reply({
         Action = "Edit-Message-Response",
         Status = "200",
@@ -2611,6 +2635,22 @@ Handlers.add("Delete-Message", function(msg)
         }) then
         return
     end
+
+    -- Forward message deletion to all subscribed bots before deleting
+    msg.forward(ao.id, {
+        Action = "Push-To-Bots",
+        Data = message.content or "",
+        Tags = {
+            ["X-Id"] = tostring(messageId),
+            ["X-Timestamp"] = tostring(message.timestamp),
+            ["X-Channel-Id"] = tostring(channelId),
+            ["X-Author-Id"] = tostring(message.authorId),
+            ["X-Attachments"] = tostring(message.attachments or ""),
+            ["X-Reply-To"] = tostring(message.replyTo or ""),
+            ["X-Event-Type"] = "MESSAGE_DELETED",
+            ["X-Deleter-Id"] = tostring(userId)
+        }
+    })
 
     -- Delete message
     if channelId then channelId = tostring(channelId) end
@@ -3093,6 +3133,13 @@ Handlers.add("Remove-Bot", function(msg)
     -- Decrement member counter
     if MemberCount > 0 then MemberCount = MemberCount - 1 end
 
+    -- Add DELETE event for state patching
+    table.insert(events, {
+        eventType = "DELETE",
+        targetTable = "bots",
+        targetKey = botProcess,
+    })
+
     -- tell subspace and bot process that bot has been removed
     ao.send({
         Target = botProcess,
@@ -3111,4 +3158,62 @@ Handlers.add("Remove-Bot", function(msg)
         Status = "200",
     })
     SyncProcessState()
+end)
+
+
+-- self message to trigger a seperate flow to send data to bots instead of the main message handler
+Handlers.add("Push-To-Bots", function(msg)
+    if not msg.From == ao.id then return end
+
+    print("Pushing msg " .. msg.Tags["X-Id"] .. " to bots")
+
+    -- Forward message to all subscribed bots
+    for botProcess, _ in pairs(SubscribedBots) do
+        if SubscribedBots[botProcess] then
+            local channelId = msg.Tags["X-Channel-Id"]
+            local userId = msg.Tags["X-Author-Id"]
+            local attachments = msg.Tags["X-Attachments"]
+            local replyTo = msg.Tags["X-Reply-To"]
+            local eventType = msg.Tags["X-Event-Type"]
+            local timestamp = msg.Tags["X-Timestamp"]
+            local messageId = msg.Tags["X-Id"]
+            local editorId = msg.Tags["X-Editor-Id"]
+            local deleterId = msg.Tags["X-Deleter-Id"]
+            local serverId = ao.id
+
+            local member = GetMember(userId)
+            local channel = GetChannel(channelId)
+
+            if not channel then return end
+            if not member then return end
+
+            local channelName = channel.name or ""
+            local serverName = Name or ""
+            local authorNickname = member.nickname or ""
+            local fromBot = IsMemberBot(userId) and "true" or "false"
+
+            local content = msg.Data
+
+            msg.forward(botProcess, {
+                Action = "Event-Message",
+                Data = content,
+                Tags = {
+                    ["X-Server-Id"] = tostring(serverId),
+                    ["X-Channel-Id"] = tostring(channelId),
+                    ["X-Author-Id"] = tostring(userId),
+                    ["X-Message-Id"] = tostring(messageId),
+                    ["X-Timestamp"] = tostring(timestamp or ""),
+                    ["X-Channel-Name"] = tostring(channelName),
+                    ["X-Server-Name"] = tostring(serverName),
+                    ["X-Author-Nickname"] = tostring(authorNickname),
+                    ["X-Attachments"] = tostring(attachments or ""),
+                    ["X-Reply-To"] = tostring(replyTo or ""),
+                    ["X-Event-Type"] = tostring(eventType),
+                    ["X-From-Bot"] = tostring(fromBot),
+                    ["X-Editor-Id"] = tostring(editorId or ""),
+                    ["X-Deleter-Id"] = tostring(deleterId or ""),
+                }
+            })
+        end
+    end
 end)

@@ -1,0 +1,30 @@
+{
+  "runtime.version": "Lua 5.4",
+  "diagnostics.globals": [
+    "ao",
+    "Handlers", 
+    "Send",
+    "Owner",
+    "json",
+    "require",
+    "print",
+    "pairs",
+    "ipairs",
+    "tostring",
+    "tonumber",
+    "table",
+    "string",
+    "math",
+    "os",
+    "type",
+    "next",
+    "assert"
+  ],
+  "workspace.library": [
+    "logic/"
+  ],
+  "completion.enable": true,
+  "hover.enable": true,
+  "signatureHelp.enable": true,
+  "format.enable": true
+}

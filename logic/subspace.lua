@@ -635,11 +635,16 @@ Handlers.add("User-Left-Server", function(msg)
         return
     end
 
-    -- SQLWrite("DELETE FROM serversJoined WHERE userId = ? AND serverId = ?", userId, serverId)
-    profiles[userId].serversJoined[tostring(serverId)] = nil
-
-    -- Resequence to ensure clean ordering after removal
-    ResequenceUserServers(userId)
+    -- Only update profile for regular users, not bots
+    -- Bots don't have profiles in the Subspace process
+    local profile = GetProfile(userId)
+    if profile then
+        -- This is a regular user with a profile
+        profiles[userId].serversJoined[tostring(serverId)] = nil
+        -- Resequence to ensure clean ordering after removal
+        ResequenceUserServers(userId)
+    end
+    -- For bots, no profile updates needed since they don't have profiles in Subspace
 
     SyncProcessState()
     msg.reply({

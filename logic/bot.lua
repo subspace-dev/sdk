@@ -28,6 +28,9 @@ Version_ = Version_ or "1.0.0"
 JoinedServers = JoinedServers or {}         -- { [serverId:string] = true }
 SubscribedServers = SubscribedServers or {} -- { [serverId:string] = true }
 
+-- Events array to store incoming events from servers
+Events = Events or {} -- Array of event objects
+
 ----------------------------------------------------------------------------
 
 -- Storage policy: in-memory tables only
@@ -84,7 +87,7 @@ end)
 
 ----------------------------------------------------------------------------
 
--- Push current bot state to Hyperbeam’s patch cache for fast external reads
+-- Push current bot state to Hyperbeam's patch cache for fast external reads
 function SyncProcessState()
     local state = {
         version = tostring(Version_),
@@ -95,6 +98,8 @@ function SyncProcessState()
         publicBot = PublicBot,
         joinedServers = JoinedServers,
         subscribedServers = SubscribedServers,
+        events = Events,
+        eventCount = #Events
     }
 
     Send({
@@ -177,12 +182,12 @@ Handlers.add("Subscribe-Response", function(msg)
     if status == "200" then
         SubscribedServers[tostring(serverId)] = true
         SyncProcessState()
-        print("✅ Bot successfully subscribed to server", serverId)
+        print("✅ Bot successfully subscribed to server " .. serverId)
     else
         -- If subscription failed, cleanup joined state
         JoinedServers[tostring(serverId)] = nil
         SyncProcessState()
-        print("❌ Bot failed to subscribe to server", serverId)
+        print("❌ Bot failed to subscribe to server " .. serverId)
     end
 end)
 
@@ -210,7 +215,33 @@ end)
 
 Handlers.add("Event-Message", function(msg)
     local serverId = msg.From
+    local serverIdFromTag = VarOrNil(msg.Tags["X-Server-Id"])
+    local eventType = VarOrNil(msg.Tags["X-Event-Type"]) or "MESSAGE_SENT"
+    local channelId = VarOrNil(msg.Tags["X-Channel-Id"])
+    local authorId = VarOrNil(msg.Tags["X-Author-Id"])
+    local messageId = VarOrNil(msg.Tags["X-Message-Id"])
+    local fromBot = VarOrNil(msg.Tags["X-From-Bot"]) and msg.Tags["X-From-Bot"] == "true" or false
+    local replyTo = VarOrNil(msg.Tags["X-Reply-To"])
+    local attachments = VarOrNil(msg.Tags["X-Attachments"])
+    local timestamp = VarOrNil(msg.Tags["X-Timestamp"])
+    local channelName = VarOrNil(msg.Tags["X-Channel-Name"])
+    local serverName = VarOrNil(msg.Tags["X-Server-Name"])
+    local authorNickname = VarOrNil(msg.Tags["X-Author-Nickname"])
+    local editorId = VarOrNil(msg.Tags["X-Editor-Id"])
+    local deleterId = VarOrNil(msg.Tags["X-Deleter-Id"])
+    local content = msg.Data
 
+    -- Verify the server ID matches both the sender and the tag
+    if ValidateCondition(serverIdFromTag and serverId ~= serverIdFromTag, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Server ID mismatch: sender does not match Server-Id tag"
+            })
+        }) then
+        return
+    end
+
+    -- Verify bot is joined to this server
     if ValidateCondition(not JoinedServers[serverId], msg, {
             Status = "400",
             Data = json.encode({
@@ -220,6 +251,7 @@ Handlers.add("Event-Message", function(msg)
         return
     end
 
+    -- Verify bot is subscribed to this server
     if ValidateCondition(not SubscribedServers[serverId], msg, {
             Status = "400",
             Data = json.encode({
@@ -229,7 +261,106 @@ Handlers.add("Event-Message", function(msg)
         return
     end
 
-    -- Hook: implement bot behavior in response to server messages here
-    print("🔔 Event-Message from server", serverId)
+    -- Validate required fields for message events
+    if ValidateCondition(not channelId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Channel-Id is required for message events"
+            })
+        }) then
+        return
+    end
+
+    if ValidateCondition(not authorId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Author-Id is required for message events"
+            })
+        }) then
+        return
+    end
+
+    if ValidateCondition(not messageId, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Message-Id is required for message events"
+            })
+        }) then
+        return
+    end
+
+    -- @param replyContent string
+    local function reply(replyContent)
+        ao.send({
+            Target = serverId,
+            Action = "Send-Message",
+            Data = replyContent,
+            Tags = { ["Channel-Id"] = channelId, ["Reply-To"] = messageId }
+        })
+    end
+
+    local event = {
+        eventType = eventType,
+        serverId = serverId,
+        channelId = channelId,
+        messageId = messageId,
+        timestamp = timestamp,
+        content = content,
+        attachments = attachments,
+        replyTo = replyTo,
+        authorId = authorId,
+        authorNickname = authorNickname or "",
+        fromBot = fromBot,
+        serverName = serverName,
+        channelName = channelName,
+        editorId = editorId or "",
+        deleterId = deleterId or "",
+        raw = msg,
+        reply = reply
+    }
+
+    -- Call main bot logic with structured event data
+    Main(event)
+
     SyncProcessState()
 end)
+
+function Setup()
+    -- update subscriptions to receive only specific events
+    -- or any other styup that needs to run once
+end
+
+---@class BotEvent
+---@field eventType string Event type: "MESSAGE_SENT" | "MESSAGE_EDITED" | "MESSAGE_DELETED"
+---@field serverId string Server process ID
+---@field channelId string Channel ID where the event occurred
+---@field messageId string Message ID
+---@field timestamp string Message timestamp
+---@field content string Message content
+---@field attachments string JSON string of attachments
+---@field replyTo string|nil Message ID being replied to
+---@field authorId string Author's user ID
+---@field authorNickname string|nil Author's nickname (if available)
+---@field fromBot boolean Whether the author is a bot
+---@field serverName string Server name
+---@field channelName string Channel name
+---@field editorId string|nil User ID who edited the message (MESSAGE_EDITED only)
+---@field deleterId string|nil User ID who deleted the message (MESSAGE_DELETED only)
+---@field rawMessage table Raw message object from AO
+---@field reply function Reply to the message
+---@field raw table Raw message object from AO
+
+---Main bot logic handler
+---@param event BotEvent
+function Main(event)
+    local displayName = event.authorNickname ~= "" and event.authorNickname or event.authorId
+
+    -- debug logs for testing
+    print(displayName .. ": " .. event.content)
+
+    -- if message is !ping, reply with pong, message can start with !ping and have more text after it
+    if event.content:match("^!ping") and event.fromBot == false then
+        event.reply("Pong!")
+        print("replied to " .. displayName .. " with pong")
+    end
+end
