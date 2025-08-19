@@ -1,130 +1,178 @@
 json = require("json")
 
-----------------------------------------------------------------------------
--- Subspace Bot Logic
---
--- Purpose:
--- - Maintain bot metadata (name and public visibility)
--- - Join/leave servers when instructed by the Subspace coordinator
--- - Track which servers the bot has joined/subscribed to
--- - Relay/handle server-originated events (hook points for future logic)
---
--- Notes:
--- - Storage is in-memory Lua tables to keep runtime simple and fast
--- - External persistence and caching is handled by Hyperbeam via SyncProcessState
-----------------------------------------------------------------------------
-
-----------------------------------------------------------------------------
---- VARIABLES
-
 Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
-Name = Name or "{NAME}"
-Description = Description or "{DESCRIPTION}"
-Pfp = Pfp or "{PFP}"
-PublicBot = PublicBot or ("{PUBLIC}" == "true")
-Version_ = Version_ or "1.0.0"
 
--- Membership and subscriptions are tracked as presence maps keyed by server id
-JoinedServers = JoinedServers or {}         -- { [serverId:string] = true }
-SubscribedServers = SubscribedServers or {} -- { [serverId:string] = true }
+Permissions = {
+    SEND_MESSAGES = 1 << 0,    -- 1
+    MANAGE_NICKNAMES = 1 << 1, -- 2
+    MANAGE_MESSAGES = 1 << 2,  -- 4
+    KICK_MEMBERS = 1 << 3,     -- 8
+    BAN_MEMBERS = 1 << 4,      -- 16
+    MANAGE_CHANNELS = 1 << 5,  -- 32
+    MANAGE_SERVER = 1 << 6,    -- 64
+    MANAGE_ROLES = 1 << 7,     -- 128
+    MANAGE_MEMBERS = 1 << 8,   -- 256
+    MENTION_EVERYONE = 1 << 9, -- 512
+    ADMINISTRATOR = 1 << 10,   -- 1024
+    ATTACHMENTS = 1 << 11,     -- 2048
+    MANAGE_BOTS = 1 << 12,     -- 4096
+}
 
--- Events array to store incoming events from servers
-Events = Events or {} -- Array of event objects
+Helpers = {
+    VarOrNil = function(var)
+        return var ~= "" and var or nil
+    end,
 
-----------------------------------------------------------------------------
+    ValidateCondition = function(condition, msg, body)
+        if condition then
+            body = body or {}
+            body.Action = body.Action or msg.Action .. "-Response"
+            body.Status = body.Status or "500"
+            body.Data = body.Data or json.encode({
+                error = "Internal server error"
+            })
+            msg.reply(body)
+            return true
+        else
+            return false
+        end
+    end,
 
--- Storage policy: in-memory tables only
-
--- Return nil for empty-string inputs so that tag lookups can be optional
-function VarOrNil(var)
-    return var ~= "" and var or nil
-end
-
--- Guard helper: if 'condition' is true, immediately reply with an error envelope
--- and return true to signal that the caller should stop further processing
-function ValidateCondition(condition, msg, body)
-    if condition then
-        body = body or {}
-        body.Action = body.Action or msg.Action .. "-Response"
-        body.Status = body.Status or "500"
-        body.Data = body.Data or json.encode({
-            error = "Internal server error"
-        })
-        msg.reply(body)
-        return true
-    else
-        return false
+    HasPermission = function(permissions, permission)
+        return (permissions & permission) == permission
     end
-end
+}
 
-----------------------------------------------------------------------------
+Bot = Bot or {
+    Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo", -- Readonly
+    Version_ = "1.0.0",                                       -- Readonly
+    JoinedServers = {},
+    Subscriptions = {},
+    PossibleEvents = { -- Readonly
+        on_message_send = "on_message_send",
+        on_message_edit = "on_message_edit",
+        on_message_delete = "on_message_delete",
 
--- Update bot's public flag and name. Only Subspace can issue this.
-Handlers.add("Update-Bot", function(msg)
-    assert(msg.From == Subspace, "❌[auth error] sender not authorized to update the bot")
+        on_member_join = "on_member_join",
+        on_member_leave = "on_member_leave",
+        on_member_update = "on_member_update",
 
-    local publicBot = VarOrNil(msg.Tags["Public-Bot"])
-    if publicBot then
-        publicBot = (publicBot == "true")
-    end
+        on_channel_create = "on_channel_create",
+        on_channel_delete = "on_channel_delete",
+        on_channel_update = "on_channel_update",
 
-    local name = VarOrNil(msg.Tags.Name)
-    local pfp = VarOrNil(msg.Tags.Pfp)
-    local description = VarOrNil(msg.Tags.Description)
+        on_category_create = "on_category_create",
+        on_category_delete = "on_category_delete",
+        on_category_update = "on_category_update"
+    },
+    RequiredEvents = {},
+    Listeners = {
+        on_message_send = function(e)
+            print("on_message_send: " .. e.author.name .. ": " .. e.message.content)
+        end,
+        on_message_edit = function(e)
+            print("on_message_edit: " .. e.author.name .. ": " .. e.message.content)
+        end,
+        on_message_delete = function(e) print("on_message_delete: " .. e.author.name .. ": " .. e.message.id) end,
 
-    -- Update in-memory bot metadata; omit fields that were not provided
-    if publicBot ~= nil then PublicBot = publicBot end
-    if name then Name = name end
-    if pfp then Pfp = pfp end
-    if description then Description = description end
+        on_member_join = function(e) print("on_member_join: " .. e.member.name) end,
+        on_member_leave = function(e) print("on_member_leave: " .. e.member.name) end,
+        on_member_update = function(e) print("on_member_update: " .. e.member.name) end,
 
-    msg.reply({
-        Action = "Update-Bot-Response",
-        Status = "200",
-    })
-    SyncProcessState()
-end)
+        on_channel_create = function(e) print("on_channel_create: " .. e.channel.name) end,
+        on_channel_delete = function(e) print("on_channel_delete: " .. e.channel.name) end,
+        on_channel_update = function(e) print("on_channel_update: " .. e.channel.name) end,
 
-----------------------------------------------------------------------------
-
--- Push current bot state to Hyperbeam's patch cache for fast external reads
-function SyncProcessState()
-    local state = {
-        version = tostring(Version_),
-        owner = Owner,
-        name = Name,
-        pfp = Pfp,
-        description = Description,
-        publicBot = PublicBot,
-        joinedServers = JoinedServers,
-        subscribedServers = SubscribedServers,
-        events = Events,
-        eventCount = #Events
+        on_category_create = function(e) print("on_category_create: " .. e.category.name) end,
+        on_category_delete = function(e) print("on_category_delete: " .. e.category.name) end,
+        on_category_update = function(e) print("on_category_update: " .. e.category.name) end,
     }
+}
 
-    Send({
-        Target = ao.id,
-        device = "patch@1.0",
-        cache = { bot = state }
+-- @param events_table table Table of events to subscribe to
+function Bot.SetRequiredEvents(events_table)
+    for event, value in pairs(events_table) do
+        if not Bot.PossibleEvents[event] then
+            error("Invalid event name: " .. event)
+        end
+        if type(value) ~= "boolean" then
+            error("Invalid event value: " .. value)
+        end
+    end
+    Bot.RequiredEvents = events_table
+
+    -- Send messages to all joined servers to subscribe to the required events
+    for serverId, value in pairs(Bot.JoinedServers) do
+        if value then
+            Send({
+                Target = serverId,
+                Action = "Subscribe",
+                Events = json.encode(Bot.RequiredEvents)
+            })
+        end
+    end
+end
+
+-- Set a listener function for an event
+-- @param event string Event name
+-- @param listener function Listener function
+function Bot.SetListener(event, listener)
+    if not Bot.PossibleEvents[event] then
+        error("Invalid event name: " .. event)
+    end
+    Bot.Listeners[event] = listener
+end
+
+-- @param serverId string Server ID
+-- @param channelId string Channel ID
+-- @param content string Content
+-- @param replyTo string Reply to message ID
+-- @param attachments table Attachments
+function Bot.SendMessage(serverId, channelId, content, replyTo, attachments)
+    if not Bot.JoinedServers[tostring(serverId)] then
+        print("SendMessage: Bot not joined to server " .. serverId)
+        return
+    end
+
+    if not channelId then
+        print("SendMessage: ChannelId is required")
+        return
+    end
+
+    if content and type(content) ~= "string" then
+        print("SendMessage: Content must be a string")
+        return
+    end
+
+    if not content or #content == 0 then
+        print("SendMessage: Content is required")
+        return
+    end
+
+    local tags = {
+        ["Channel-Id"] = tostring(channelId),
+    }
+    if replyTo then
+        tags["Reply-To"] = tostring(replyTo)
+    end
+    if attachments and type(attachments) == "table" then
+        tags["Attachments"] = json.encode(attachments)
+    end
+
+    ao.send({
+        Target = serverId,
+        Action = "Send-Message",
+        Tags = tags,
+        Data = content
     })
 end
 
-InitialSync = InitialSync or false
-if not InitialSync then
-    InitialSync = true
-    SyncProcessState()
-    print("✅ Bot initial sync complete")
-end
-
-----------------------------------------------------------------------------
-
--- Request to join a server and subscribe to its updates. Only Subspace can issue this.
 Handlers.add("Join-Server", function(msg)
-    assert(msg.From == Subspace, "You are not allowed to join servers")
+    assert(msg.From == Subspace, "Join-Server: Invalid sender " .. msg.From)
 
-    local serverId = VarOrNil(msg.Tags["Server-Id"])
+    local serverId = Helpers.VarOrNil(msg.Tags["Server-Id"])
 
-    if ValidateCondition(not serverId, msg, {
+    if Helpers.ValidateCondition(not serverId, msg, {
             Status = "400",
             Data = json.encode({
                 error = "ServerId is required"
@@ -132,23 +180,26 @@ Handlers.add("Join-Server", function(msg)
         }) then
         return
     end
+
+    -- TODO: Server blacklisting can be implemetned here
 
     -- Reply to Subspace that we're ready to join
     msg.reply({
         Action = "Join-Server-Response",
         Status = "200",
-        Tags = { ["Server-Id"] = serverId }
+        ["Server-Id"] = serverId,
+        ["Events"] = json.encode(Bot.RequiredEvents)
     })
-    SyncProcessState()
 end)
 
--- Handle successful server approval and complete the join process
-Handlers.add("Join-Server-Success", function(msg)
-    assert(msg.From == Subspace, "You are not allowed to complete server join")
+Handlers.add("Join-Server-Result", function(msg)
+    assert(msg.From == Subspace, "Join-Server-Result: Invalid sender " .. msg.From)
 
-    local serverId = VarOrNil(msg.Tags["Server-Id"])
+    local serverId = Helpers.VarOrNil(msg.Tags["Server-Id"])
+    local status = Helpers.VarOrNil(msg.Tags["Status"])
+    local data = Helpers.VarOrNil(msg.Data)
 
-    if ValidateCondition(not serverId, msg, {
+    if Helpers.ValidateCondition(not serverId, msg, {
             Status = "400",
             Data = json.encode({
                 error = "ServerId is required"
@@ -157,210 +208,104 @@ Handlers.add("Join-Server-Success", function(msg)
         return
     end
 
-    -- Mark as joined
-    JoinedServers[tostring(serverId)] = true
+    if status ~= "200" then
+        Bot.JoinedServers[tostring(serverId)] = nil
+        print("Join-Server-Result: " .. status .. " " .. data)
+        return
+    end
 
-    -- Subscribe to server events
-    ao.send({
-        Target = serverId,
-        Action = "Subscribe"
-    })
+    -- Mark as joined
+    Bot.JoinedServers[tostring(serverId)] = true
+
+    -- Automatically subscribe to events if we have required events
+    if next(Bot.RequiredEvents) then
+        ao.send({
+            Target = serverId,
+            Action = "Subscribe",
+            Tags = {
+                Events = json.encode(Bot.RequiredEvents)
+            }
+        })
+    end
+
     ao.send({
         Target = Subspace,
-        Action = "Join-Server-Success-Response",
+        Action = "Join-Server-Result-Response",
         Tags = { ["Server-Id"] = serverId }
     })
-
-    SyncProcessState()
 end)
+
 
 -- Handle subscription response from server
 Handlers.add("Subscribe-Response", function(msg)
     local serverId = msg.From
-    local status = VarOrNil(msg.Tags["Status"])
+    local status = Helpers.VarOrNil(msg.Tags["Status"])
+    local events = Helpers.VarOrNil(msg.Tags["Events"])
+
+    if events then
+        events = json.decode(events)
+    else
+        events = {}
+    end
 
     if status == "200" then
-        SubscribedServers[tostring(serverId)] = true
-        SyncProcessState()
-        print("✅ Bot successfully subscribed to server " .. serverId)
+        Bot.Subscriptions[tostring(serverId)] = events
     else
-        -- If subscription failed, cleanup joined state
-        JoinedServers[tostring(serverId)] = nil
-        SyncProcessState()
-        print("❌ Bot failed to subscribe to server " .. serverId)
+        Bot.Subscriptions[tostring(serverId)] = nil
     end
 end)
-
-
 
 -- Server has removed the bot: clean up local membership/subscription and unsubscribe
 Handlers.add("Remove-Bot", function(msg)
     local serverId = msg.From
 
-    JoinedServers[tostring(serverId)] = nil
-    SubscribedServers[tostring(serverId)] = nil
-
-    -- send unsubscription messages
-    ao.send({
-        Target = serverId,
-        Action = "Unsubscribe",
-    })
-    SyncProcessState()
+    Bot.JoinedServers[tostring(serverId)] = nil
+    Bot.Subscriptions[tostring(serverId)] = nil
 end)
 
+-----
 
-----------------------------------------------------------------------------
-
--- Events sent from servers (hook points)
-
-Handlers.add("Event-Message", function(msg)
+Handlers.add("Event", function(msg)
     local serverId = msg.From
-    local serverIdFromTag = VarOrNil(msg.Tags["X-Server-Id"])
-    local eventType = VarOrNil(msg.Tags["X-Event-Type"]) or "MESSAGE_SENT"
-    local channelId = VarOrNil(msg.Tags["X-Channel-Id"])
-    local authorId = VarOrNil(msg.Tags["X-Author-Id"])
-    local messageId = VarOrNil(msg.Tags["X-Message-Id"])
-    local fromBot = VarOrNil(msg.Tags["X-From-Bot"]) and msg.Tags["X-From-Bot"] == "true" or false
-    local replyTo = VarOrNil(msg.Tags["X-Reply-To"])
-    local attachments = VarOrNil(msg.Tags["X-Attachments"])
-    local timestamp = VarOrNil(msg.Tags["X-Timestamp"])
-    local channelName = VarOrNil(msg.Tags["X-Channel-Name"])
-    local serverName = VarOrNil(msg.Tags["X-Server-Name"])
-    local authorNickname = VarOrNil(msg.Tags["X-Author-Nickname"])
-    local editorId = VarOrNil(msg.Tags["X-Editor-Id"])
-    local deleterId = VarOrNil(msg.Tags["X-Deleter-Id"])
-    local content = msg.Data
+    local eventType = Helpers.VarOrNil(msg.Tags["Event-Type"])
+    local data = Helpers.VarOrNil(msg.Data) -- data is the json encoded data sent from the server
 
-    -- Verify the server ID matches both the sender and the tag
-    if ValidateCondition(serverIdFromTag and serverId ~= serverIdFromTag, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Server ID mismatch: sender does not match Server-Id tag"
-            })
-        }) then
+    if not Bot.JoinedServers[tostring(serverId)] then
+        print("Event: Bot not joined to server " .. serverId)
         return
     end
 
-    -- Verify bot is joined to this server
-    if ValidateCondition(not JoinedServers[serverId], msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Bot is not in the server"
-            })
-        }) then
+    if not Bot.Subscriptions[tostring(serverId)] then
+        print("Event: Bot not subscribed to server " .. serverId)
         return
     end
 
-    -- Verify bot is subscribed to this server
-    if ValidateCondition(not SubscribedServers[serverId], msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Bot is not subscribed to the server"
-            })
-        }) then
+    if not eventType then
+        print("Event: No event type")
         return
     end
 
-    -- Validate required fields for message events
-    if ValidateCondition(not channelId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel-Id is required for message events"
-            })
-        }) then
+    -- validate event type is in Bot.PossibleEvents
+    if not Bot.PossibleEvents[eventType] then
+        print("Event: Invalid event type " .. eventType)
         return
     end
 
-    if ValidateCondition(not authorId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Author-Id is required for message events"
-            })
-        }) then
+    local listener = Bot.Listeners[eventType]
+    if not listener then
+        print("Event: No listener for event " .. eventType)
         return
     end
 
-    if ValidateCondition(not messageId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Message-Id is required for message events"
-            })
-        }) then
-        return
-    end
-
-    -- @param replyContent string
-    local function reply(replyContent)
-        ao.send({
-            Target = serverId,
-            Action = "Send-Message",
-            Data = replyContent,
-            Tags = { ["Channel-Id"] = channelId, ["Reply-To"] = messageId }
-        })
-    end
-
-    local event = {
-        eventType = eventType,
-        serverId = serverId,
-        channelId = channelId,
-        messageId = messageId,
-        timestamp = timestamp,
-        content = content,
-        attachments = attachments,
-        replyTo = replyTo,
-        authorId = authorId,
-        authorNickname = authorNickname or "",
-        fromBot = fromBot,
-        serverName = serverName,
-        channelName = channelName,
-        editorId = editorId or "",
-        deleterId = deleterId or "",
-        raw = msg,
-        reply = reply
-    }
-
-    -- Call main bot logic with structured event data
-    Main(event)
-
-    SyncProcessState()
+    ListenerProxy(listener, json.decode(data), eventType)
 end)
 
-function Setup()
-    -- update subscriptions to receive only specific events
-    -- or any other styup that needs to run once
-end
-
----@class BotEvent
----@field eventType string Event type: "MESSAGE_SENT" | "MESSAGE_EDITED" | "MESSAGE_DELETED"
----@field serverId string Server process ID
----@field channelId string Channel ID where the event occurred
----@field messageId string Message ID
----@field timestamp string Message timestamp
----@field content string Message content
----@field attachments string JSON string of attachments
----@field replyTo string|nil Message ID being replied to
----@field authorId string Author's user ID
----@field authorNickname string|nil Author's nickname (if available)
----@field fromBot boolean Whether the author is a bot
----@field serverName string Server name
----@field channelName string Channel name
----@field editorId string|nil User ID who edited the message (MESSAGE_EDITED only)
----@field deleterId string|nil User ID who deleted the message (MESSAGE_DELETED only)
----@field rawMessage table Raw message object from AO
----@field reply function Reply to the message
----@field raw table Raw message object from AO
-
----Main bot logic handler
----@param event BotEvent
-function Main(event)
-    local displayName = event.authorNickname ~= "" and event.authorNickname or event.authorId
-
-    -- debug logs for testing
-    print(displayName .. ": " .. event.content)
-
-    -- if message is !ping, reply with pong, message can start with !ping and have more text after it
-    if event.content:match("^!ping") and event.fromBot == false then
-        event.reply("Pong!")
-        print("replied to " .. displayName .. " with pong")
+function ListenerProxy(listener, data, eventType)
+    if eventType == "on_message_send" or eventType == "on_message_edit" then
+        data.message.reply = function(content, attachments)
+            Bot.SendMessage(data.server.id, data.channel.id, content, data.message.id, attachments)
+        end
     end
+
+    listener(data)
 end

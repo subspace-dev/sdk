@@ -129,6 +129,7 @@ end
 
 -- legacy default DB bootstrap comments removed
 SubscribedBots = SubscribedBots or {}
+-- example structure = {[bot-id]={[event-type]=true, [event-type]=true, ...}}
 
 Permissions = {
     SEND_MESSAGES = 1 << 0,    -- 1
@@ -144,6 +145,24 @@ Permissions = {
     ADMINISTRATOR = 1 << 10,   -- 1024
     ATTACHMENTS = 1 << 11,     -- 2048
     MANAGE_BOTS = 1 << 12,     -- 4096
+}
+
+Events = { -- Readonly
+    on_message_send = "on_message_send",
+    on_message_edit = "on_message_edit",
+    on_message_delete = "on_message_delete",
+
+    on_member_join = "on_member_join",
+    on_member_leave = "on_member_leave",
+    on_member_update = "on_member_update",
+
+    on_channel_create = "on_channel_create",
+    on_channel_delete = "on_channel_delete",
+    on_channel_update = "on_channel_update",
+
+    on_category_create = "on_category_create",
+    on_category_delete = "on_category_delete",
+    on_category_update = "on_category_update"
 }
 
 -- if SQLRead("SELECT COUNT(*) as roleCount FROM roles")[1].roleCount == 0 then
@@ -195,6 +214,14 @@ function GetMember(userId)
         return (a.orderId or 0) < (b.orderId or 0)
     end)
     return copy
+end
+
+function GetMemberPermissions(member)
+    local permissions = 0
+    for _, role in ipairs(member.roles) do
+        permissions = permissions | role.permissions
+    end
+    return permissions
 end
 
 -- Sanitize member data before storage - keep only raw data
@@ -2471,7 +2498,7 @@ Handlers.add("Send-Message", function(msg)
             ["X-Author-Id"] = tostring(userId),
             ["X-Attachments"] = tostring(attachments or ""),
             ["X-Reply-To"] = tostring(replyTo or ""),
-            ["X-Event-Type"] = "MESSAGE_SENT"
+            ["X-Event-Type"] = "on_message_send"
         }
     })
 end)
@@ -2562,7 +2589,7 @@ Handlers.add("Edit-Message", function(msg)
             ["X-Author-Id"] = tostring(message.authorId),
             ["X-Attachments"] = tostring(message.attachments or ""),
             ["X-Reply-To"] = tostring(message.replyTo or ""),
-            ["X-Event-Type"] = "MESSAGE_EDITED",
+            ["X-Event-Type"] = "on_message_edit",
             ["X-Editor-Id"] = tostring(userId)
         }
     })
@@ -2647,7 +2674,7 @@ Handlers.add("Delete-Message", function(msg)
             ["X-Author-Id"] = tostring(message.authorId),
             ["X-Attachments"] = tostring(message.attachments or ""),
             ["X-Reply-To"] = tostring(message.replyTo or ""),
-            ["X-Event-Type"] = "MESSAGE_DELETED",
+            ["X-Event-Type"] = "on_message_delete",
             ["X-Deleter-Id"] = tostring(userId)
         }
     })
@@ -3070,6 +3097,7 @@ end)
 
 Handlers.add("Subscribe", function(msg)
     local botProcess = msg.From
+    local events = VarOrNil(msg.Tags.Events)
 
     -- verify if bot is approved
     local bot = bots[botProcess]
@@ -3082,12 +3110,58 @@ Handlers.add("Subscribe", function(msg)
         return
     end
 
-    -- add bot to subsriptions list
-    SubscribedBots[botProcess] = true
+    -- Parse events if provided
+    local subscribedEvents = {}
+    if events then
+        local success, parsedEvents = pcall(json.decode, events)
+        if success and type(parsedEvents) == "table" then
+            -- Validate that all event keys are valid
+            for eventKey, value in pairs(parsedEvents) do
+                if not Events[eventKey] then
+                    msg.reply({
+                        Action = "Subscribe-Response",
+                        Status = "400",
+                        Data = json.encode({
+                            error = "Invalid event key: " .. eventKey
+                        })
+                    })
+                    return
+                end
+                -- Validate that the value is a boolean
+                if type(value) ~= "boolean" then
+                    msg.reply({
+                        Action = "Subscribe-Response",
+                        Status = "400",
+                        Data = json.encode({
+                            error = "Invalid event value for " .. eventKey .. ": expected boolean, got " .. type(value)
+                        })
+                    })
+                    return
+                end
+            end
+            subscribedEvents = parsedEvents
+        else
+            -- If JSON parsing failed, return an error
+            msg.reply({
+                Action = "Subscribe-Response",
+                Status = "400",
+                Data = json.encode({
+                    error = "Invalid JSON format for events"
+                })
+            })
+            return
+        end
+    end
+
+    -- add bot to subsriptions list with their subscribed events
+    SubscribedBots[botProcess] = subscribedEvents
 
     msg.reply({
         Action = "Subscribe-Response",
         Status = "200",
+        Tags = {
+            Events = json.encode(subscribedEvents)
+        }
     })
     SyncProcessState()
 end)
@@ -3168,8 +3242,8 @@ Handlers.add("Push-To-Bots", function(msg)
     print("Pushing msg " .. msg.Tags["X-Id"] .. " to bots")
 
     -- Forward message to all subscribed bots
-    for botProcess, _ in pairs(SubscribedBots) do
-        if SubscribedBots[botProcess] then
+    for botProcess, subscribedEvents in pairs(SubscribedBots) do
+        if subscribedEvents and type(subscribedEvents) == "table" then
             local channelId = msg.Tags["X-Channel-Id"]
             local userId = msg.Tags["X-Author-Id"]
             local attachments = msg.Tags["X-Attachments"]
@@ -3181,39 +3255,64 @@ Handlers.add("Push-To-Bots", function(msg)
             local deleterId = msg.Tags["X-Deleter-Id"]
             local serverId = ao.id
 
+            -- Check if bot is subscribed to this event type
+            if not subscribedEvents[eventType] then
+                return
+            end
+
             local member = GetMember(userId)
             local channel = GetChannel(channelId)
-
-            if not channel then return end
-            if not member then return end
+            if not channel then goto continue end
+            if not member then goto continue end
 
             local channelName = channel.name or ""
             local serverName = Name or ""
             local authorNickname = member.nickname or ""
             local fromBot = IsMemberBot(userId) and "true" or "false"
-
+            local permissions = GetMemberPermissions(member)
             local content = msg.Data
 
+            -- Build Discord-like structured event data
+            local eventData = {
+                eventType = eventType,
+                server = {
+                    id = serverId,
+                    name = serverName,
+                    logo = Logo,
+                    owner = Owner,
+                    description = Description
+                },
+                channel = {
+                    id = channelId,
+                    name = channelName,
+                },
+                author = {
+                    id = userId,
+                    nickname = authorNickname or "",
+                    isBot = fromBot == "true",
+                    roles = member.roles,
+                    joinedAt = member.joinedAt,
+                    permissions = permissions,
+                },
+                message = {
+                    id = messageId,
+                    content = content or "",
+                    timestamp = timestamp,
+                    attachments = attachments and json.decode(attachments) or {},
+                    replyTo = replyTo,
+                    mentions = {}
+                }
+            }
+
             msg.forward(botProcess, {
-                Action = "Event-Message",
-                Data = content,
+                Action = "Event",
+                Data = json.encode(eventData),
                 Tags = {
-                    ["X-Server-Id"] = tostring(serverId),
-                    ["X-Channel-Id"] = tostring(channelId),
-                    ["X-Author-Id"] = tostring(userId),
-                    ["X-Message-Id"] = tostring(messageId),
-                    ["X-Timestamp"] = tostring(timestamp or ""),
-                    ["X-Channel-Name"] = tostring(channelName),
-                    ["X-Server-Name"] = tostring(serverName),
-                    ["X-Author-Nickname"] = tostring(authorNickname),
-                    ["X-Attachments"] = tostring(attachments or ""),
-                    ["X-Reply-To"] = tostring(replyTo or ""),
-                    ["X-Event-Type"] = tostring(eventType),
-                    ["X-From-Bot"] = tostring(fromBot),
-                    ["X-Editor-Id"] = tostring(editorId or ""),
-                    ["X-Deleter-Id"] = tostring(deleterId or ""),
+                    ["Event-Type"] = tostring(eventType)
                 }
             })
+
+            ::continue::
         end
     end
 end)

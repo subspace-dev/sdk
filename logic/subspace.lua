@@ -2038,8 +2038,11 @@ Handlers.add("Approve-Add-Bot-Response", function(msg)
     -- send message to bot to complete join
     ao.send({
         Target = botProcess,
-        Action = "Join-Server-Success",
-        Tags = { ["Server-Id"] = serverId }
+        Action = "Join-Server-Result",
+        Tags = {
+            ["Server-Id"] = serverId,
+            ["Status"] = "200"
+        }
     })
 
     add_bot_tracker[botProcess][serverId] = {
@@ -2048,7 +2051,7 @@ Handlers.add("Approve-Add-Bot-Response", function(msg)
     SyncProcessState()
 end)
 
-Handlers.add("Join-Server-Success-Response", function(msg)
+Handlers.add("Join-Server-Result-Response", function(msg)
     local botProcess = msg.From
     local serverId = VarOrNil(msg.Tags["Server-Id"])
 
@@ -2072,7 +2075,7 @@ Handlers.add("Join-Server-Success-Response", function(msg)
     bots[botProcess].servers[serverId] = true
 
     add_bot_tracker[botProcess][serverId] = {
-        join_server_success = true
+        join_server_result = true
     }
     SyncProcessState()
 end)
@@ -2094,7 +2097,9 @@ Handlers.add("Remove-Bot", function(msg)
 
     -- remove bot from serversJoined table
     -- SQLWrite("DELETE FROM botServers WHERE botProcess = ? AND serverId = ?", botProcess, serverId)
-    bots[botProcess].servers[serverId] = nil
+    if bots[botProcess] and bots[botProcess].servers then
+        bots[botProcess].servers[serverId] = nil
+    end
 
     SyncProcessState()
 
@@ -2102,4 +2107,87 @@ Handlers.add("Remove-Bot", function(msg)
         Action = "Remove-Bot-Response",
         Status = "200",
     })
+end)
+
+Handlers.add("Delete-Bot", function(msg)
+    local userId = msg.From
+    userId = GetOriginalId(userId)
+    local botProcess = VarOrNil(msg.Tags["Bot-Process"]) or VarOrNil(msg.Tags["BotProcess"])
+
+    if ValidateCondition(not botProcess, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Bot-Process is required"
+            })
+        })
+    then
+        return
+    end
+
+    -- Check if user profile exists
+    local profile = GetProfile(userId)
+    if ValidateCondition(not profile, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Profile not found"
+            })
+        })
+    then
+        return
+    end
+
+    -- Check if bot exists and user is the owner
+    local bot = bots[botProcess]
+    if ValidateCondition(not bot, msg, {
+            Status = "404",
+            Data = json.encode({
+                error = "Bot not found"
+            })
+        })
+    then
+        return
+    end
+
+    if ValidateCondition(bot.owner ~= userId, msg, {
+            Status = "403",
+            Data = json.encode({
+                error = "You are not the owner of this bot"
+            })
+        })
+    then
+        return
+    end
+
+    -- Check if bot is still in any servers (safety check)
+    local stillInServers = false
+    if bot.servers then
+        for serverId, isJoined in pairs(bot.servers) do
+            if isJoined then
+                stillInServers = true
+                break
+            end
+        end
+    end
+
+    if ValidateCondition(stillInServers, msg, {
+            Status = "400",
+            Data = json.encode({
+                error = "Cannot delete bot that is still in servers. Remove bot from all servers first."
+            })
+        })
+    then
+        return
+    end
+
+    -- Delete bot from bots table
+    bots[botProcess] = nil
+
+    msg.reply({
+        Action = "Delete-Bot-Response",
+        Status = "200",
+        Data = json.encode({
+            success = true
+        })
+    })
+    SyncProcessState()
 end)

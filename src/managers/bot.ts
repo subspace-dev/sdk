@@ -5,14 +5,12 @@ import type { Tag } from "../types/ao";
 
 export interface Bot {
     public: boolean;
-    subscribedServers?: Record<string, boolean>;
     joinedServers?: Record<string, boolean>;
     name: string;
     pfp?: string;
     description?: string;
     process: string;
     owner: string;
-    version: string; // bot process code version
 }
 
 export interface ServerBot {
@@ -59,19 +57,11 @@ export class BotManager {
                 // The bot process will use default behavior
                 console.warn("Bot source code not available, using default bot behavior");
             } else {
-                // Replace template placeholders in the bot source code
-                let botSourceCode = this.connectionManager.sources.Bot.Lua;
-
-                // Replace placeholders
-                botSourceCode = botSourceCode.replace('{NAME}', params.name);
-                botSourceCode = botSourceCode.replace('{DESCRIPTION}', params.description || '');
-                botSourceCode = botSourceCode.replace('{PFP}', params.pfp || '');
-                botSourceCode = botSourceCode.replace('{PUBLIC}', (params.publicBot ?? true).toString());
-
-                // Load bot source code into the spawned process
+                // Load bot source code into the spawned process (no metadata replacement)
+                // Bot processes now only contain functional logic, not metadata
                 const botRes = await this.connectionManager.execLua({
                     processId: botId,
-                    code: botSourceCode,
+                    code: this.connectionManager.sources.Bot.Lua,
                     tags: []
                 });
 
@@ -87,7 +77,8 @@ export class BotManager {
                     { name: "Bot-Process", value: botId },
                     { name: "Name", value: params.name },
                     { name: "Public-Bot", value: (params.publicBot ?? true).toString() },
-                    { name: "Pfp", value: params.pfp || "" }
+                    { name: "Pfp", value: params.pfp || "" },
+                    { name: "Description", value: params.description || "" }
                 ]
             });
 
@@ -106,15 +97,7 @@ export class BotManager {
 
     async getBot(botId: string): Promise<Bot | null> {
         return loggedAction('🔍 getting bot info', { botId }, async () => {
-            // Get bot's own state from its process
-            // let botprocessBotData: any | null = null;
-            // try {
-            //     botprocessBotData = await this.connectionManager.hashpathGET<any>(`${botId}~process@1.0/now/cache/bot/~json@1.0/serialize`)
-            // } catch (_) {
-            //     botprocessBotData = null;
-            // }
-
-            // Get bot metadata from Subspace process
+            // Get bot metadata from Subspace process (primary source)
             let subspaceBotData: any | null = null;
             try {
                 subspaceBotData = await this.connectionManager.hashpathGET<any>(`${Constants.Subspace}~process@1.0/now/cache/subspace/bots/${botId}/~json@1.0/serialize`)
@@ -122,32 +105,20 @@ export class BotManager {
                 subspaceBotData = null;
             }
 
-            console.log('subspaceBotData', subspaceBotData);
-
-            // @ts-ignore
-            const botInfo: Bot = {};
-
-            // if (botprocessBotData) {
-            //     botInfo.public = botprocessBotData.publicBot || false;
-            //     botInfo.joinedServers = botprocessBotData.joinedServers || {};
-            //     botInfo.subscribedServers = botprocessBotData.subscribedServers || {};
-            //     botInfo.name = botprocessBotData?.name || 'Unknown Bot';
-            //     botInfo.pfp = botprocessBotData?.pfp;
-            //     botInfo.description = botprocessBotData?.description;
-            //     botInfo.version = botprocessBotData?.version || 'unknown';
-            //     botInfo.owner = botprocessBotData?.owner || '';
-            //     botInfo.process = botId;
-            // }
-            if (subspaceBotData) {
-                // Subspace data can override some fields if available
-                botInfo.name = subspaceBotData.name || botInfo.name;
-                botInfo.owner = subspaceBotData.owner || botInfo.owner;
-                botInfo.pfp = subspaceBotData.pfp || botInfo.pfp;
-                botInfo.description = subspaceBotData.description || botInfo.description;
-                botInfo.process = botId;
-                botInfo.public = subspaceBotData.public || false;
-                botInfo.joinedServers = subspaceBotData.servers || {};
+            if (!subspaceBotData) {
+                return null;
             }
+
+            const botInfo: Bot = {
+                name: subspaceBotData.name || 'Unknown Bot',
+                owner: subspaceBotData.owner || '',
+                pfp: subspaceBotData.pfp,
+                description: subspaceBotData.description,
+                process: botId,
+                public: subspaceBotData.public || false,
+                joinedServers: subspaceBotData.servers || {},
+            };
+
             return botInfo;
         });
     }
@@ -155,7 +126,7 @@ export class BotManager {
 
     async getAllBots(): Promise<Record<string, Bot>> {
         return loggedAction('🔍 getting all bots', {}, async () => {
-            // Get all bots metadata from Subspace process
+            // Get all bots metadata from Subspace process (primary source)
             let botsMetadata: Record<string, any> | null = null;
             try {
                 botsMetadata = await this.connectionManager.hashpathGET<Record<string, any>>(`${Constants.Subspace}~process@1.0/now/cache/subspace/bots/~json@1.0/serialize`)
@@ -165,31 +136,19 @@ export class BotManager {
 
             const result: Record<string, Bot> = {};
             if (botsMetadata) {
-                // For each bot in metadata, fetch its own state
+                // Use only Subspace data as the primary source
                 for (const [botId, metadata] of Object.entries(botsMetadata)) {
                     if (!metadata) continue;
 
-                    // Get bot's own state
-                    let botState: any | null = null;
-                    try {
-                        botState = await this.connectionManager.hashpathGET<any>(`${botId}~process@1.0/now/cache/bot/~json@1.0/serialize`)
-                    } catch (_) {
-                        botState = null;
-                    }
-
-                    if (botState) {
-                        result[botId] = {
-                            public: botState.publicBot || false,
-                            subscribedServers: botState.subscribedServers || {},
-                            joinedServers: botState.joinedServers || {},
-                            name: botState.name || metadata.name || 'Unknown Bot',
-                            pfp: botState.pfp || metadata.pfp,
-                            description: botState.description || metadata.description,
-                            process: botId,
-                            owner: botState.owner || metadata.owner || '',
-                            version: botState.version || 'unknown',
-                        };
-                    }
+                    result[botId] = {
+                        public: metadata.public || false,
+                        joinedServers: metadata.servers || {},
+                        name: metadata.name || 'Unknown Bot',
+                        pfp: metadata.pfp,
+                        description: metadata.description,
+                        process: botId,
+                        owner: metadata.owner || '',
+                    };
                 }
             }
 
@@ -314,13 +273,23 @@ export class BotManager {
         return loggedAction('🗑️ deleting bot', { botId }, async () => {
             // First remove bot from all servers
             const bot = await this.getBot(botId);
-            if (bot) {
-                for (const serverId of Object.keys(bot.joinedServers)) {
-                    try {
-                        await this.removeBotFromServer({ serverId, botId });
-                    } catch (error) {
-                        console.warn(`Failed to remove bot from server ${serverId}:`, error);
+            if (bot && bot.joinedServers) {
+                const serverIds = Object.keys(bot.joinedServers).filter(serverId => bot.joinedServers![serverId]);
+
+                if (serverIds.length > 0) {
+                    console.log(`Removing bot from ${serverIds.length} servers before deletion`);
+
+                    for (const serverId of serverIds) {
+                        try {
+                            await this.removeBotFromServer({ serverId, botId });
+                        } catch (error) {
+                            console.warn(`Failed to remove bot from server ${serverId}:`, error);
+                            // Continue with other servers even if one fails
+                        }
                     }
+
+                    // Wait a bit for server removals to complete
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
 
@@ -329,34 +298,30 @@ export class BotManager {
                 processId: Constants.Subspace,
                 tags: [
                     { name: "Action", value: "Delete-Bot" },
-                    { name: "BotProcess", value: botId }
+                    { name: "Bot-Process", value: botId }
                 ]
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data?.success === true;
-        });
-    }
-
-    async anchorToBot(anchorId: string): Promise<Bot | null> {
-        return loggedAction('⚓ anchoring to bot', { anchorId }, async () => {
-            const res = await this.connectionManager.dryrun({
-                processId: Constants.Subspace,
-                tags: [
-                    { name: "Action", value: Constants.Actions.AnchorToBot },
-                    { name: "Anchor-Id", value: anchorId }
-                ]
+            const msg = this.connectionManager.parseOutput(res, {
+                hasMatchingTag: "Action",
+                hasMatchingTagValue: "Delete-Bot-Response"
             });
 
-            const data = this.connectionManager.parseOutput(res);
-            return data ? data as Bot : null;
+            if (!msg || msg.Tags.Status !== "200") {
+                throw new Error(msg?.Data || "Failed to delete bot from Subspace");
+            }
+
+            const responseData = msg.Data ? JSON.parse(msg.Data) : {};
+            return responseData.success === true;
         });
     }
 
     // Polling status functions for bot addition process
     async getBotStatus(botId: string): Promise<{ joinedServers?: Record<string, boolean> } | null> {
+        // Bot processes no longer store metadata, get from Subspace instead
         try {
-            return await this.connectionManager.hashpathGET<any>(`${botId}/now/cache/bot/~json@1.0/serialize`);
+            const subspaceData = await this.connectionManager.hashpathGET<any>(`${Constants.Subspace}~process@1.0/now/cache/subspace/bots/${botId}/~json@1.0/serialize`);
+            return subspaceData ? { joinedServers: subspaceData.servers || {} } : null;
         } catch (error) {
             console.warn(`Failed to get bot status for ${botId}:`, error);
             return null;
@@ -429,6 +394,7 @@ export class BotManager {
                     const subspaceResult = subspaceData.status === 'fulfilled' ? subspaceData.value : null;
 
                     // Check completion conditions
+                    // Since bot processes no longer store metadata, we rely on Subspace and server data
                     const botJoined = botResult?.joinedServers?.[params.serverId] === true;
                     const serverApproved = serverResult?.[params.botId]?.approved === true;
                     const subspaceUpdated = subspaceResult?.servers?.[params.serverId] === true;
