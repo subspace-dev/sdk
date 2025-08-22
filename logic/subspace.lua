@@ -174,7 +174,6 @@ function SyncProcessState()
         servers = servers,
         delegations = delegations,
         bots = bots,
-        notifications = notifications,
         add_bot_tracker = add_bot_tracker
     }
 
@@ -508,10 +507,28 @@ Handlers.add("Approve-Join-Server", function(msg)
         return
     end
 
-    profile.serversJoined[tostring(serverId)] = {
-        orderId = GetNextServerOrderId(profile),
-        serverApproved = false -- Show the user this server only when serverApproves the join request
-    }
+    -- Check if user is already in the server (either approved or not)
+    local existingServerEntry = profile.serversJoined[tostring(serverId)]
+    if existingServerEntry then
+        -- If already approved, return success (idempotent operation)
+        if existingServerEntry.serverApproved then
+            msg.reply({
+                Action = "Approve-Join-Server-Response",
+                Status = "200",
+                Data = json.encode(profile)
+            })
+            return
+        end
+        -- If not approved, reset the entry to allow re-joining
+        -- This handles cases where a previous join attempt failed
+        existingServerEntry.serverApproved = false
+    else
+        -- Create new server entry
+        profile.serversJoined[tostring(serverId)] = {
+            orderId = GetNextServerOrderId(profile),
+            serverApproved = false -- Show the user this server only when serverApproves the join request
+        }
+    end
 
     profiles[userId] = profile
 
@@ -556,15 +573,37 @@ Handlers.add("User-Joined-Server", function(msg)
 
     -- Check if user has approved the join request
     if not profile.serversJoined[tostring(serverId)] then
-        msg.reply({
-            Action = "User-Joined-Server-Response",
-            Status = "400",
-            Data = json.encode({
-                error = "User has not approved the join request"
+        -- If user hasn't pre-approved but server is trying to add them,
+        -- create the entry if server approved is true (for recovery scenarios)
+        if serverApproved then
+            profile.serversJoined[tostring(serverId)] = {
+                orderId = GetNextServerOrderId(profile),
+                serverApproved = true
+            }
+            profiles[userId] = profile
+            -- Resequence to ensure clean ordering
+            ResequenceUserServers(userId)
+            SyncProcessState()
+            msg.reply({
+                Action = "User-Joined-Server-Response",
+                Status = "200",
+                Data = json.encode({
+                    message = "User added to server (recovery mode)"
+                })
             })
-        })
-        return
+            return
+        else
+            msg.reply({
+                Action = "User-Joined-Server-Response",
+                Status = "400",
+                Data = json.encode({
+                    error = "User has not approved the join request"
+                })
+            })
+            return
+        end
     end
+
     if ValidateCondition(not serverApproved, msg, {
             Status = "400",
             Data = json.encode({
@@ -572,11 +611,14 @@ Handlers.add("User-Joined-Server", function(msg)
             })
         })
     then
+        -- Remove the entry if server rejected the join
         profile.serversJoined[tostring(serverId)] = nil
         profiles[userId] = profile
+        SyncProcessState()
         return
     end
 
+    -- Update the existing entry
     profile.serversJoined[tostring(serverId)].serverApproved = serverApproved
     profiles[userId] = profile
 

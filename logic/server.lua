@@ -861,17 +861,29 @@ Handlers.add("Join-Server", function(msg)
         return
     end
 
-    local member = GetMember(userId)
-    if ValidateCondition(member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User is already in the server"
-            })
-        }) then
+    local existingMember = GetMember(userId)
+    if existingMember then
+        -- User is already in the server - this is idempotent, just return success
+        -- This handles cases where the join process was interrupted but the user was already added
+        msg.reply({
+            Action = "Join-Server-Response",
+            Status = "200",
+        })
+
+        -- Still notify Subspace to ensure consistency (idempotent on their side too)
+        ao.send({
+            Target = Subspace,
+            Action = "User-Joined-Server",
+            Tags = {
+                ["User-Id"] = userId,
+                ["Server-Approved"] = "true"
+            }
+        })
         return
     end
 
-    member = {
+    -- Create new member
+    local member = {
         userId = userId,
         nickname = nil,
         joinedAt = joinedAt,

@@ -485,7 +485,25 @@ export class UserManager {
             });
 
             const data = this.connectionManager.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Join-Server-Response" });
-            return data?.Tags.Status === "200";
+
+            // Enhanced debugging for join failures
+            if (data?.Tags?.Status !== "200") {
+                const errorInfo = {
+                    serverId,
+                    responseStatus: data?.Tags?.Status,
+                    responseData: data?.Data,
+                    fullResponse: data
+                };
+
+                // Provide specific error messages for common issues
+                if (data?.Tags?.Status === "400" && data?.Data?.error?.includes("not public")) {
+                    console.error('Join server failed: Server is not public. Ask server admins to make it public or invite you directly.', errorInfo);
+                } else {
+                    console.error('Join server failed:', errorInfo);
+                }
+            }
+
+            return data?.Tags?.Status === "200";
         });
     }
 
@@ -494,16 +512,47 @@ export class UserManager {
             // Step 1: Approve join request in Subspace
             const approvalSuccess = await this.approveJoinServer(serverId);
             if (!approvalSuccess) {
-                throw new Error('Failed to approve join server request');
+                throw new Error(`Failed to approve join server request for server ${serverId}`);
             }
 
-            // Step 2: Send join request to the server
-            const joinSuccess = await this.joinServer(serverId);
+            // Step 2: Send join request to the server with retry logic
+            let joinSuccess = false;
+            let lastError: any = null;
+
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    // Small delay between approval and join to allow state propagation
+                    if (attempt > 1) {
+                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                    }
+
+                    joinSuccess = await this.joinServer(serverId);
+                    if (joinSuccess) {
+                        break;
+                    }
+                } catch (error) {
+                    lastError = error;
+                    console.warn(`Join attempt ${attempt} failed:`, error);
+                }
+            }
+
             if (!joinSuccess) {
-                throw new Error('Failed to join server after approval');
+                throw new Error(`Failed to join server ${serverId} after approval (tried 3 times). Last error: ${lastError?.message || 'Unknown error'}. Check console for detailed error information.`);
             }
 
             return true;
+        });
+    }
+
+    /**
+     * Retry joining a server - useful if a previous join attempt failed partway through.
+     * This method is idempotent and safe to call multiple times.
+     * It will handle cases where the user is already partially joined.
+     */
+    async retryJoinServer(serverId: string): Promise<boolean> {
+        return loggedAction('🔄 retrying server join (user)', { serverId }, async () => {
+            // Both approval and join are now idempotent, so we can safely retry both steps
+            return await this.joinServerWithApproval(serverId);
         });
     }
 
