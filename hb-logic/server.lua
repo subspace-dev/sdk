@@ -117,6 +117,9 @@ members = {}
 --- @type table<string, Member>
 bots = {}
 
+--- @type table<string, Message>
+messages = {}
+
 server = server or {
     --- @type Server
     profile = {

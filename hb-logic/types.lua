@@ -2,6 +2,7 @@
 --- @field id string
 --- @field pfp string
 --- @field banner string
+--- @field bio string
 --- @field dm_process string
 --- @field servers table<string, {order_id: number, approved: boolean}>
 --- @field friends { sent: table<string, boolean>, received: table<string, boolean>, accepted: table<string, boolean> }
