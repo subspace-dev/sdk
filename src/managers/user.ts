@@ -5,32 +5,38 @@ import type { Tag } from "../types/ao";
 import { getPrimaryName, getWanderTierInfo, WanderTierInfo } from "../utils/lib";
 
 export interface Profile {
-    userId: string;
-    pfp?: string;
-    primaryName?: string;
-    wndrTier?: WanderTierInfo;
-    bio?: string;
-    banner?: string;
-    // Key-value map of serverId -> server info
-    serversJoined: Record<string, {
-        orderId: number;
-        serverApproved?: boolean;
+    id: string;
+    pfp: string;
+    banner: string;
+    bio: string;
+    dm_process: string;
+    servers: Record<string, {
+        order_id: number;
+        approved: boolean;
     }>;
-    friends?: {
-        accepted: string[]
-        sent: string[]
-        received: string[]
+    friends: {
+        sent: Record<string, boolean>
+        accepted: Record<string, boolean>
+        received: Record<string, boolean>
     };
-    dmProcess?: string;
-    delegations?: string[];
+    notifications: Record<string, Notification>;
+
+    extra?: {
+        primary_name?: string;
+        wndr_tier?: WanderTierInfo;
+    }
 }
 
 export interface Notification {
     id: string;
-    type: string;
-    data: any;
-    timestamp: number;
-    read: boolean;
+    is_dm: boolean;
+    server_id: string;
+    channel_id: string;
+    author_id: string;
+    author_nickname: string;
+    message_id: string;
+    timestamp: string;
+    preview_content: string;
 }
 
 export interface Friend {
@@ -60,7 +66,7 @@ export class UserManager {
         return loggedAction('🔍 getting profile', { userId }, async () => {
             let data: Profile | null = null
             try {
-                data = await this.connectionManager.hashpathGET<Profile>(`${Constants.Subspace}~process@1.0/now/cache/subspace/profiles/${userId}/~json@1.0/serialize`)
+                data = await this.connectionManager.hashpathGET<Profile>(`${Constants.Subspace}~process@1.0/now/subspace/profiles/${userId}/~json@1.0/serialize`)
             } catch (e) {
                 throw new Error("[subspace-sdk] failed to get profile: " + e)
                 return null
@@ -75,20 +81,22 @@ export class UserManager {
             }
 
             const profile: Profile = {
-                userId,
+                id: userId,
                 pfp: data.pfp || "",
-                delegations: data.delegations || [],
-                // Lua state stores serversJoined as a table keyed by serverId
-                // Normalize to an object map in TS
-                serversJoined: data.serversJoined || {},
-                dmProcess: data.dmProcess || "",
+                banner: data.banner || "",
+                bio: data.bio || "",
+                dm_process: data.dm_process || "",
+                servers: data.servers || {},
                 friends: data.friends || {
-                    accepted: [],
-                    sent: [],
-                    received: []
+                    sent: {},
+                    accepted: {},
+                    received: {}
                 },
-                primaryName: primaryName || undefined,
-                wndrTier: wanderTierInfo || undefined
+                notifications: data.notifications || {},
+                extra: {
+                    primary_name: primaryName || undefined,
+                    wndr_tier: wanderTierInfo || undefined
+                }
             }
             return profile;
             // const res = await this.connectionManager.dryrun({
@@ -178,19 +186,19 @@ export class UserManager {
                 ]
             })
 
-            // retry 3 times to wait for this.connectionManager.sources.Dm.Lua to populate
+            // retry 3 times to wait for this.connectionManager.sources.dm.lua to populate
             for (let i = 0; i < 3; i++) {
-                if (this.connectionManager.sources.Dm.Lua) break
+                if (this.connectionManager.sources.dm.lua) break
                 await new Promise(resolve => setTimeout(resolve, 1000 * i))
             }
 
-            if (!this.connectionManager.sources.Dm.Lua) {
+            if (!this.connectionManager.sources.dm.lua) {
                 throw new Error("Failed to get dm source")
             }
 
             const dmRes = await this.connectionManager.execLua({
                 processId: dmProcess,
-                code: this.connectionManager.sources.Dm.Lua,
+                code: this.connectionManager.sources.dm.lua,
                 tags: []
             })
             // wait 1.5 seconds for dm process to finish

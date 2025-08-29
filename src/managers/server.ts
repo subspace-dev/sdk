@@ -110,16 +110,16 @@ export class ServerManager {
 
             // Wait for sources to be available (retry up to 3 times)
             for (let i = 0; i < 3; i++) {
-                if (this.connectionManager.sources?.Server?.Lua) break;
+                if (this.connectionManager.sources?.server?.lua) break;
                 await new Promise(resolve => setTimeout(resolve, 1000 * i));
             }
 
-            if (!this.connectionManager.sources?.Server?.Lua) {
+            if (!this.connectionManager.sources?.server?.lua) {
                 throw new Error("Failed to get server source code");
             }
 
             // Replace template placeholders in the server source code
-            let serverSourceCode = this.connectionManager.sources.Server.Lua;
+            let serverSourceCode = this.connectionManager.sources.server.lua;
 
             // Replace placeholders
             serverSourceCode = serverSourceCode.replace('{NAME}', params.name);
@@ -275,11 +275,11 @@ export class ServerManager {
 
             // Wait for sources to be available (retry up to 3 times)
             for (let i = 0; i < 3; i++) {
-                if (this.connectionManager.sources?.Server?.Lua) break;
+                if (this.connectionManager.sources?.server?.lua) break;
                 await new Promise(resolve => setTimeout(resolve, 1000 * i));
             }
 
-            if (!this.connectionManager.sources?.Server?.Lua) {
+            if (!this.connectionManager.sources?.server?.lua) {
                 throw new Error("Failed to get latest server source code");
             }
 
@@ -290,7 +290,7 @@ export class ServerManager {
             }
 
             // Get the latest server source code
-            let serverSourceCode = this.connectionManager.sources.Server.Lua;
+            let serverSourceCode = this.connectionManager.sources.server.lua;
 
             // Replace template placeholders with current server data
             serverSourceCode = serverSourceCode.replace('{NAME}', currentServer.name);

@@ -1,11 +1,11 @@
 export const Constants = {
     // Subspace: 'H8v1gaO41__s3O0c4pw8cELLF2QhTkm9g5JqeoFEzjY',
-    Subspace: 'RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo',
+    Subspace: 'OPlpETFDsK8h52dHw5z6pp9n1yIDlLVGhhqshQPmGzU',
     Authority: 'fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY',
 
     // AO Configuration
-    Scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
-    Module: "ISShJH1ij-hPPt9St5UFFr_8Ys3Kj5cyg7zrMGt7H9s", // sqlite aos 2.0.4 supports patch device
+    // Scheduler: "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA",
+    Module: "xVcnPK8MPmcocS6zwq1eLmM2KhfyarP8zzmz3UVi1g4", // hyper-aos module
 
     CuEndpoints: [
         "https://cu.ao-testnet.xyz",

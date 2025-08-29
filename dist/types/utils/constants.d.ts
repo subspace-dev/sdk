@@ -1,7 +1,6 @@
 export declare const Constants: {
     Subspace: string;
     Authority: string;
-    Scheduler: string;
     Module: string;
     CuEndpoints: string[];
     Actions: {

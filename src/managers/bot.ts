@@ -48,11 +48,11 @@ export class BotManager {
 
             // Wait for sources to be available (retry up to 3 times)
             for (let i = 0; i < 3; i++) {
-                if (this.connectionManager.sources?.Bot?.Lua) break;
+                if (this.connectionManager.sources?.bot?.lua) break;
                 await new Promise(resolve => setTimeout(resolve, 1000 * i));
             }
 
-            if (!this.connectionManager.sources?.Bot?.Lua) {
+            if (!this.connectionManager.sources?.bot?.lua) {
                 // If bot source is not available, still try to register the bot
                 // The bot process will use default behavior
                 console.warn("Bot source code not available, using default bot behavior");
@@ -61,7 +61,7 @@ export class BotManager {
                 // Bot processes now only contain functional logic, not metadata
                 const botRes = await this.connectionManager.execLua({
                     processId: botId,
-                    code: this.connectionManager.sources.Bot.Lua,
+                    code: this.connectionManager.sources.bot.lua,
                     tags: []
                 });
 
@@ -100,7 +100,7 @@ export class BotManager {
             // Get bot metadata from Subspace process (primary source)
             let subspaceBotData: any | null = null;
             try {
-                subspaceBotData = await this.connectionManager.hashpathGET<any>(`${Constants.Subspace}~process@1.0/now/cache/subspace/bots/${botId}/~json@1.0/serialize`)
+                subspaceBotData = await this.connectionManager.hashpathGET<any>(`${Constants.Subspace}~process@1.0/now/subspace/bots/${botId}/~json@1.0/serialize`)
             } catch (_) {
                 subspaceBotData = null;
             }

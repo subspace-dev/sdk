@@ -32,7 +32,6 @@ export class Subspace {
     // Convenience method for getting current connection info
     getConnectionInfo() {
         return {
-            cuUrl: this.connectionManager.getCuUrl(),
             hyperbeamUrl: this.connectionManager.hyperbeamUrl,
             owner: this.connectionManager.owner,
             hasJwk: !!this.connectionManager.jwk,

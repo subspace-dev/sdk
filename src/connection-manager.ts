@@ -6,7 +6,6 @@ import type { JWKInterface } from "arweave/web/lib/wallet";
 import type { Tag, MessageResult, AoSigner } from "./types/ao";
 
 export interface ConnectionConfig {
-    CU_URL?: string;
     GATEWAY_URL?: string;
     HYPERBEAM_URL?: string;
     signer?: AoSigner;
@@ -15,20 +14,20 @@ export interface ConnectionConfig {
 }
 
 export interface Sources {
-    Server: {
-        Id: string;
-        Version: string;
-        Lua?: string;
+    server: {
+        id: string;
+        version: string;
+        lua?: string;
     }
-    Dm: {
-        Id: string;
-        Version: string;
-        Lua?: string;
+    dm: {
+        id: string;
+        version: string;
+        lua?: string;
     }
-    Bot: {
-        Id: string;
-        Version: string;
-        Lua?: string;
+    bot: {
+        id: string;
+        version: string;
+        lua?: string;
     }
 }
 
@@ -37,23 +36,23 @@ export class ConnectionManager {
     jwk: JWKInterface | null = null
     signer: AoSigner | null = null
     owner: string
-    cuUrl: string
     hyperbeamUrl: string
     gatewayUrl: string
     sources: Sources
 
     constructor(config: ConnectionConfig = {}) {
-        this.cuUrl = config.CU_URL || Constants.CuEndpoints[0] || 'https://cu.arnode.asia'
-        this.hyperbeamUrl = config.HYPERBEAM_URL || "https://forward.computer"
-        this.gatewayUrl = config.GATEWAY_URL || 'https://arweave.net'
+        this.hyperbeamUrl = config.HYPERBEAM_URL || "https://hb.arnode.asia"
+        this.gatewayUrl = config.GATEWAY_URL || 'https://arnode.asia'
         this.owner = config.owner || ""
         this.jwk = config.jwk || null
         this.signer = config.signer || null
 
         this.ao = connect({
-            MODE: "legacy",
-            CU_URL: this.cuUrl,
+            MODE: "mainnet",
+            URL: this.hyperbeamUrl,
             GATEWAY_URL: this.gatewayUrl,
+            signer: this.signer,
+            device: "process@1.0",
         })
 
         this.refreshSources()
@@ -71,6 +70,25 @@ export class ConnectionManager {
                 await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)))
             }
         }
+        throw new Error(`Failed to fetch after ${maxRetries} retries`)
+    }
+
+    async operator(): Promise<string> {
+        const scheduler = (await (await fetch(this.hyperbeamUrl + '/~meta@1.0/info/address')).text()).trim()
+        return scheduler
+    }
+
+    async readState<T>({ processId, path }: { processId: string, path?: string }): Promise<T> {
+        let hashpath = `${this.hyperbeamUrl}/${processId}~process@1.0`
+        if (path) {
+            hashpath += `/${path.startsWith("/") ? path.slice(1) : path}`
+        } else {
+            hashpath += "/now/cache"
+        }
+        hashpath += "/~json@1.0/serialize"
+
+        const res = await fetch(hashpath)
+        return (await res.json()) as T
     }
 
     static sanitizeHyperbeamResult(input: Record<string, any>): any {
@@ -129,39 +147,40 @@ export class ConnectionManager {
     }
 
     updateConfig(config: Partial<ConnectionConfig>) {
-
-        if (config.CU_URL) this.cuUrl = config.CU_URL
         if (config.GATEWAY_URL) this.gatewayUrl = config.GATEWAY_URL
+        if (config.HYPERBEAM_URL) this.hyperbeamUrl = config.HYPERBEAM_URL
         if (config.owner) this.owner = config.owner
         if (config.jwk) this.jwk = config.jwk
         if (config.signer) this.signer = config.signer
 
         this.ao = connect({
-            MODE: "legacy",
-            CU_URL: this.cuUrl,
+            MODE: "mainnet",
+            URL: this.hyperbeamUrl,
             GATEWAY_URL: this.gatewayUrl,
+            signer: this.signer,
+            device: "process@1.0",
         })
     }
 
     public async refreshSources() {
         // fetch sources from Subspace process
         loggedAction('🔍 fetching sources', {}, async () => {
-            const hashpath = `${this.hyperbeamUrl}/${Constants.Subspace}~process@1.0/now/cache/subspace/sources/~json@1.0/serialize`
+            const hashpath = `${this.hyperbeamUrl}/${Constants.Subspace}/now/sources/~json@1.0/serialize`
             const res = await fetch(hashpath)
             const resJson = await res.json() as Sources
 
             // const sources = this.parseOutput(res, { hasMatchingTag: "Action", hasMatchingTagValue: "Sources-Response" })
             if (resJson) {
                 this.sources = {
-                    Server: resJson.Server,
-                    Dm: resJson.Dm,
-                    Bot: resJson.Bot,
+                    server: resJson.server,
+                    dm: resJson.dm,
+                    bot: resJson.bot,
                 }
                 // fetch source src from arweave.net/Id
                 const fetchPromises = Object.values(this.sources).map(async (source) => {
-                    if (source.Id) {
-                        const src = await fetch(`${this.gatewayUrl}/${source.Id}`).then(res => res.text())
-                        source.Lua = src
+                    if (source.id) {
+                        const src = await fetch(`${this.gatewayUrl}/${source.id}`).then(res => res.text())
+                        source.lua = src
                     }
                 })
                 await Promise.all(fetchPromises)
@@ -171,7 +190,8 @@ export class ConnectionManager {
     }
 
     getAo() { return this.ao }
-    getCuUrl() { return this.cuUrl }
+    getHyperbeamUrl() { return this.hyperbeamUrl }
+    getGatewayUrl() { return this.gatewayUrl }
     setJwk(jwk: JWKInterface) { this.jwk = jwk }
 
     getAoSigner() {
@@ -196,83 +216,259 @@ export class ConnectionManager {
         throw new Error('No signer available. Provide either a signer, JWK, or ensure ArConnect is available.');
     }
 
-    async spawn({ tags }: { tags: Tag[] }): Promise<string> {
+    async spawn({ tags, data, module_ }: { tags: Tag[], data?: any, module_?: string }): Promise<string> {
         return loggedAction('🚀 spawning process', { tags: tags.map(t => `${t.name}=${t.value}`).join(', ') }, async () => {
-            const args = {
-                scheduler: Constants.Scheduler,
-                module: Constants.Module,
-                signer: this.getAoSigner(),
-                tags: [
-                    ...tags,
-                    { name: "Authority", value: Constants.Authority }
-                ]
+            const params: any = {
+                path: '/push',
+                method: 'POST',
+                type: 'Process',
+                device: 'process@1.0',
+                'scheduler-device': 'scheduler@1.0',
+                'push-device': 'push@1.0',
+                'execution-device': 'lua@5.3a',
+                'data-protocol': 'ao',
+                variant: 'ao.N.1',
+                Random: Math.random().toString(),
+                Authority: await this.operator() + ',' + Constants.Authority,
+                'signing-format': 'ANS-104',
+                Module: module_ || Constants.Module,
+                scheduler: await this.operator(),
             }
-            const res: string = await this.ao.spawn(args)
-            return res;
+
+            // Add custom tags as properties
+            if (tags) {
+                tags.forEach(tag => {
+                    params[tag.name] = tag.value
+                })
+            }
+
+            // Add data if provided
+            if (data) {
+                params.data = data
+            }
+
+            const res = await this.ao.request(params)
+            const spawnResJson = await res
+            const process = spawnResJson.process
+
+            // delay 1s to ensure process is ready
+            await new Promise(resolve => setTimeout(resolve, 1000))
+
+            // Start live monitoring and wait for first result
+            await this.startLiveMonitoringAndActivate(process)
+
+            return process
         });
     }
 
     async execLua({ processId, code, tags }: { processId: string, code: string, tags: Tag[] }): Promise<MessageResult & { id: string }> {
         return loggedAction('⚙️ executing lua', { processId, codeLength: code.length }, async () => {
-            const args = {
-                process: processId,
+            return this.sendMessage({
+                processId,
                 data: code,
-                signer: this.getAoSigner(),
                 tags: [
                     ...tags,
                     { name: "Action", value: "Eval" }
-                ],
-            }
-            const messageId: string = await this.ao.message(args)
-
-            const res: MessageResult & { id: string } = await this.ao.result({
-                process: processId,
-                message: messageId,
+                ]
             })
-
-            res.id = messageId
-            return res;
         });
     }
 
     async sendMessage({ processId, data, tags, noResult = false }: { processId: string, data?: string, tags: Tag[], noResult?: boolean }): Promise<MessageResult & { id: string }> {
-
-        const args = {
-            process: processId,
-            data: data || "",
-            signer: this.getAoSigner(),
-            tags,
-        }
-        const messageId: string = await this.ao.message(args)
-
-        if (noResult) {
-            return { id: messageId } as any
+        const params: any = {
+            path: `/${processId}~process@1.0/push/serialize~json@1.0`,
+            method: 'POST',
+            type: 'Message',
+            'data-protocol': 'ao',
+            variant: 'ao.N.1',
+            target: processId,
+            'signing-format': 'ANS-104',
         }
 
-        const res: MessageResult & { id: string } = await this.ao.result({
-            process: processId,
-            message: messageId,
-        })
+        // Add tags as properties
+        if (tags) {
+            tags.forEach(tag => {
+                params[tag.name] = tag.value
+            })
+        }
 
-        res.id = messageId;
-        return res;
+        // Add data if provided
+        if (data) {
+            params.data = data
+        }
 
+        const res = await this.ao.request(params)
+        const result = await JSON.parse(res.body)
+        return { id: result.id || result.messageId, ...result }
     }
 
     async dryrun({ processId, data, tags }: { processId: string, data?: string, tags: Tag[] }): Promise<MessageResult> {
-        // For dryrun requests, we need a valid owner/wallet address
-        const owner = this.owner;
-        if (!owner || owner.trim() === "") {
-            throw new Error("Owner address is required for dryrun operations");
-        }
-        const res: MessageResult = await this.ao.dryrun({
-            process: processId,
-            data: data || "",
-            tags,
-            Owner: owner,
-        })
+        // In hyperbeam mode, use read operation for dryrun-like functionality
+        // This is a simplified approach - in practice you might want to use a different endpoint
+        throw new Error("Dryrun not supported in hyperbeam mode. Use readState instead for state queries.");
+    }
 
-        return res;
+    async runLua({ processId, code }: { processId: string, code: string }): Promise<any> {
+        return loggedAction('⚙️ running lua code', { processId, codeLength: code.length }, async () => {
+            return this.sendMessage({
+                processId,
+                tags: [
+                    { name: "Action", value: "Eval" }
+                ],
+                data: code
+            })
+        });
+    }
+
+    private async startLiveMonitoringAndActivate(processId: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            let isResolved = false
+            const timeout = setTimeout(() => {
+                if (!isResolved) {
+                    isResolved = true
+                    reject(new Error('Process activation timeout'))
+                }
+            }, 30000) // 30 second timeout
+
+            const stopMonitoring = this.startLiveMonitoring(processId, {
+                intervalMs: 1000,
+                onResult: async (result) => {
+                    if (!isResolved) {
+                        isResolved = true
+                        clearTimeout(timeout)
+                        stopMonitoring()
+
+                        // Send initial activation message
+                        try {
+                            await this.sendMessage({
+                                processId,
+                                tags: [{ name: 'Action', value: 'Eval' }],
+                                data: "require('.process')._version",
+                                noResult: true
+                            })
+                        } catch (e) {
+                            console.warn('Process activation message failed:', e)
+                        }
+
+                        resolve()
+                    }
+                }
+            })
+        })
+    }
+
+    private startLiveMonitoring(
+        processId: string,
+        options: {
+            intervalMs?: number
+            onResult?: (result: { slot: number; output?: string; error?: string; hasNewData: boolean; hasPrint: boolean }) => void
+            lastKnownSlot?: number
+        } = {}
+    ): () => void {
+        const {
+            intervalMs = 2000,
+            onResult,
+        } = options
+
+        let lastSlot: number | undefined = options.lastKnownSlot
+        let isRunning = true
+
+        const checkForUpdates = async () => {
+            if (!isRunning) return
+
+            try {
+                // Get the current slot
+                const currentSlotPath = `${processId}~process@1.0/slot/current/body`
+                const currentSlot = await this.readState<{ body: number }>({
+                    processId,
+                    path: 'slot/current/body'
+                })
+                const currentSlotNumber = currentSlot.body
+
+                // Determine which slot to check
+                const slotToCheck = lastSlot ? lastSlot + 1 : currentSlotNumber
+
+                // If we're already at the latest slot, no new data
+                if (slotToCheck > currentSlotNumber) {
+                    // Schedule next check
+                    if (isRunning) {
+                        setTimeout(checkForUpdates, intervalMs)
+                    }
+                    return
+                }
+
+                // Fetch computation results for the slot
+                const results = await this.readState<any>({
+                    processId,
+                    path: `compute&slot=${slotToCheck}/results`
+                })
+
+                // Check if results have print output
+                const hasPrint = !!(results?.output?.print)
+
+                let output: string | undefined
+                let error: string | undefined
+                let hasNewData = false
+
+                if (results && hasPrint) {
+                    if (this.isExecutionError(results)) {
+                        error = this.parseMonitoringOutput(results)
+                        output = results.output.data
+                    } else {
+                        output = this.parseMonitoringOutput(results)
+                    }
+                    hasNewData = !!(output || error)
+                }
+
+                const result = {
+                    slot: slotToCheck,
+                    output,
+                    error,
+                    hasNewData,
+                    hasPrint
+                }
+
+                // Update last slot regardless of whether there's new data
+                lastSlot = slotToCheck
+
+                // Only call handler if there's new data with print output
+                if (hasNewData && hasPrint && onResult) {
+                    onResult(result)
+                }
+
+            } catch (error) {
+                console.error('Error in live monitoring:', error)
+            }
+
+            // Schedule next check
+            if (isRunning) {
+                setTimeout(checkForUpdates, intervalMs)
+            }
+        }
+
+        // Start monitoring
+        checkForUpdates()
+
+        // Return stop function
+        return () => {
+            isRunning = false
+        }
+    }
+
+    private isExecutionError(results: any): boolean {
+        return results?.output?.data?.includes('error') ||
+            results?.output?.data?.includes('Error') ||
+            results?.error
+    }
+
+    private parseMonitoringOutput(results: any): string {
+        if (results?.output?.print) {
+            return results.output.print
+        }
+        if (results?.output?.data) {
+            return results.output.data
+        }
+        return ''
     }
 
     parseOutput(res: MessageResult, { hasMatchingTag, hasMatchingTagValue }: { hasMatchingTag?: string, hasMatchingTagValue?: string } = {}) {
