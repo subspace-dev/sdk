@@ -2,17 +2,17 @@ local json = require("json")
 
 --#region configuration
 
-sources = sources or {
+sources = {
     bot = {
-        id = "0yFR8HCG_4y9eS0S6-hbrFZIgaM-97gMNB-WWiwOogQ",
+        id = "-39AGlB7YiOkJNVaKqmyBf23PYhWo1fM-1vPqaRF_Uk",
         version = "1.0.0"
     },
     dm = {
-        id = "RRFdbQy-ApzRIKdyI2GDIMi7Tmkgqsz7Ee4eNiYWY9k",
+        id = "r_riETrqmeSxkAjMFY3-hGSVIw_3idegT9oO6GCfMqo",
         version = "1.0.0"
     },
     server = {
-        id = "Tq5ZJlO4xAS7QtXlSZyGeBUOI6vkKvQGTzsn8_gqmdM",
+        id = "rE83-07MpDfdCLr_6zwLQUeuwRj8UQlWGLTue1hubzc",
         version = "1.0.0"
     },
 }
@@ -55,7 +55,7 @@ helpers = helpers or {
         internal_server_error = 500,
         not_implemented = 501,
     },
-    --- @type table<string, Event>
+    --- @type table<string, ServerEvent>
     events = { -- read only
         message_sent = 10,
         message_edited = 20,
@@ -135,7 +135,11 @@ local utils = {
     --- @param msg table
     handle_run = function(func, msg)
         msg.reply = function(data)
-            data.target = msg.from
+            if not msg['from-process'] then
+                data.target = id
+            else
+                data.target = msg.from
+            end
             if not data["x-status"] then data["x-status"] = helpers.status.success end
             send(data)
         end
@@ -151,8 +155,12 @@ local utils = {
             }
             table.insert(helpers.logs, error_item)
             pprint(error_item)
+            local target = msg.from
+            if not msg['from-process'] then
+                target = id
+            end
             send({
-                target = msg.from,
+                target = target,
                 action = "error",
                 ["x-status"] = res.status,
                 ["x-error"] = res.error,
@@ -329,7 +337,7 @@ local utils = {
             return subspace.servers[serverId]
         end,
         --- @param serverId string
-        --- @param server {owner_id: string, public_server: boolean}|nil -- if nil, the server will be deleted
+        --- @param server {owner_id: string}|nil -- if nil, the server will be deleted
         set = function(serverId, server)
             subspace.servers[serverId] = server
         end,
@@ -414,6 +422,7 @@ local function create_profile(msg)
     local dmProcess = utils.var_or_nil(msg["dm-process"])
     local pfp = utils.var_or_nil(msg["pfp"])
     local banner = utils.var_or_nil(msg["banner"])
+    local bio = utils.var_or_nil(msg["bio"])
 
     -- Get the existing profile for this user (if any)
     local profile = utils.profiles.get(userId)
@@ -451,10 +460,15 @@ local function create_profile(msg)
         assert(utils.valid_tx_id(banner), "400|banner must be a valid arweave tx id")
     end
 
+    if bio then
+        assert(type(bio) == "string", "400|bio must be a string")
+    end
+
     profile = {
         id = userId,
         dm_process = tostring(dmProcess),
         pfp = pfp or "",
+        bio = bio or "",
         banner = banner or "",
         servers = {},
         friends = {
@@ -484,6 +498,7 @@ local function update_profile(msg)
     local userId = msg.from
     local pfp = utils.var_or_nil(msg["pfp"])
     local banner = utils.var_or_nil(msg["banner"])
+    local bio = utils.var_or_nil(msg["bio"])
 
     local profile = utils.profiles.get(userId)
     assert(profile, "404|profile not found")
@@ -496,6 +511,11 @@ local function update_profile(msg)
     if banner then
         assert(utils.valid_tx_id(banner), "400|banner must be a valid arweave tx id")
         profile.banner = banner
+    end
+
+    if bio then
+        assert(type(bio) == "string", "400|bio must be a string")
+        profile.bio = bio
     end
 
     utils.profiles.set(userId, profile)
@@ -522,7 +542,7 @@ local function create_server(msg)
     local serverDescription = utils.var_or_nil(msg["server-description"])
     local serverPfp = utils.var_or_nil(msg["server-pfp"])
     local serverBanner = utils.var_or_nil(msg["server-banner"])
-    local serverPublic = utils.var_or_nil(msg["server-public"]) or true
+    -- serverPublic parameter removed
 
     -- get the profile
     local profile = utils.profiles.get(userId)
@@ -534,9 +554,8 @@ local function create_server(msg)
     -- make sure that the server process is not already in the database
     assert(not utils.servers.get(serverProcess), "400|server already exists")
 
-    if serverName then
-        assert(type(serverName) == "string", "400|server name must be a string")
-    end
+    assert(serverName, "400|server name is required")
+    assert(type(serverName) == "string", "400|server name must be a string")
     if serverDescription then
         assert(type(serverDescription) == "string", "400|server description must be a string")
     end
@@ -554,7 +573,7 @@ local function create_server(msg)
         description = serverDescription or "",
         pfp = serverPfp or "",
         banner = serverBanner or "",
-        public_server = serverPublic
+        -- public_server field removed
     }
     utils.servers.set(serverProcess, server)
 
@@ -565,7 +584,7 @@ local function create_server(msg)
         ["server-description"] = serverDescription,
         ["server-pfp"] = serverPfp,
         ["server-banner"] = serverBanner,
-        ["server-public"] = serverPublic
+        -- server-public parameter removed
     })
 
     msg.reply({
@@ -581,18 +600,17 @@ end)
 
 local function update_server(msg)
     local serverId = msg.from
-    local serverPublic = utils.var_or_nil(msg["server-public"])
+    -- serverPublic parameter removed
     local serverName = utils.var_or_nil(msg["server-name"])
     local serverDescription = utils.var_or_nil(msg["server-description"])
     local serverPfp = utils.var_or_nil(msg["server-pfp"])
     local serverBanner = utils.var_or_nil(msg["server-banner"])
+    local serverOwner = utils.var_or_nil(msg["server-owner"])
 
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
 
-    if serverPublic then
-        assert(type(serverPublic) == "boolean", "400|server public must be a boolean")
-    end
+    -- serverPublic validation removed
     if serverName then
         assert(type(serverName) == "string", "400|server name must be a string")
     end
@@ -605,15 +623,15 @@ local function update_server(msg)
     if serverBanner then
         assert(utils.valid_tx_id(serverBanner), "400|server banner must be a valid arweave tx id")
     end
-    if serverPublic then
-        assert(type(serverPublic) == "boolean", "400|server public must be a boolean")
-    end
+    -- serverPublic validation removed
 
-    server.public_server = serverPublic or true
-    server.name = serverName or ""
-    server.description = serverDescription or ""
-    server.pfp = serverPfp or ""
-    server.banner = serverBanner or ""
+    -- server.public_server field removed
+    server.name = serverName or server.name
+    server.description = serverDescription or server.description
+    server.pfp = serverPfp or server.pfp
+    server.banner = serverBanner or server.banner
+    server.owner = serverOwner or server.owner
+
     utils.servers.set(serverId, server)
 
     msg.reply({
@@ -677,7 +695,7 @@ Handlers.add("join-server", function(msg)
     utils.handle_run(join_server, msg)
 end)
 
-local function add_member_response(msg)
+local function approve_add_member(msg)
     local serverId = msg.from
     local userId = utils.var_or_nil(msg["user-id"])
     local status = utils.var_or_nil(msg["status"])
@@ -704,17 +722,13 @@ local function add_member_response(msg)
             utils.profiles.set(userId, profile)
             utils.servers.reorder_servers(profile)
         end
-        msg.reply({
-            action = "add-member-response",
-            status = helpers.status.success,
-        })
     else
         error(tostring(status) .. "|check server logs /" .. serverId .. "/now/helpers/logs")
     end
 end
 
-Handlers.add("add-member-response", function(msg)
-    utils.handle_run(add_member_response, msg)
+Handlers.add("approve-add-member", function(msg)
+    utils.handle_run(approve_add_member, msg)
 end)
 
 ---#region server

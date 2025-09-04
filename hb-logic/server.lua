@@ -2,7 +2,7 @@ local json = require("json")
 
 --#region configuration
 
-subspace_id = "WSeRkeXPzE_Zckh3w6wghWKGZ_7Lm9U61qXj_JSdujo"
+subspace_id = "<<SUBSPACE>>"
 
 --#endregion
 
@@ -52,7 +52,7 @@ helpers = helpers or {
         internal_server_error = 500,
         not_implemented = 501,
     },
-    --- @type table<string, Event>
+    --- @type table<string, ServerEvent>
     events = { -- read only
         message_sent = 10,
         message_edited = 20,
@@ -129,7 +129,7 @@ server = server or {
         description = "",
         pfp = "",
         banner = "",
-        public_server = true,
+        -- public_server field removed
     },
     member_count = 0,
     --- @type table<string, Category>
@@ -403,7 +403,11 @@ local utils = {
     end,
     handle_run = function(func, msg)
         msg.reply = function(data)
-            data.target = msg.from
+            local target = msg.from
+            if not msg['from-process'] then
+                target = id
+            end
+            data.target = target
             if not data["x-status"] then data["x-status"] = helpers.status.success end
             send(data)
         end
@@ -419,8 +423,12 @@ local utils = {
             }
             table.insert(helpers.logs, error_item)
             pprint(error_item)
+            local target = msg.from
+            if not msg['from-process'] then
+                target = id
+            end
             send({
-                target = msg.from,
+                target = target,
                 action = "error",
                 ["x-status"] = res.status,
                 ["x-error"] = res.error,
@@ -497,17 +505,93 @@ local function setup(msg)
     local serverDescription = msg["server-description"]
     local serverPfp = msg["server-pfp"]
     local serverBanner = msg["server-banner"]
-    local serverPublic = msg["server-public"]
+    -- serverPublic parameter removed
 
     server.profile.name = serverName or ""
     server.profile.description = serverDescription or ""
     server.profile.pfp = serverPfp or ""
     server.profile.banner = serverBanner or ""
-    server.profile.public_server = serverPublic or true
+    -- server.profile.public_server field removed
 end
 
 Handlers.once("setup", function(msg)
     utils.handle_run(setup, msg)
+end)
+
+-- Since HB doesnot know yet if a target is a wallet or process and errors out
+-- Instead of sending reply to wallet, dump it to self, to make sure it is still readable in frontend
+Handlers.add("dump", function(msg)
+    local action = msg.action
+    local function ends_with(str, suffix)
+        -- Handle edge cases
+        if not str or not suffix then
+            return false
+        end
+
+        -- Convert to strings if they aren't already
+        str = tostring(str)
+        suffix = tostring(suffix)
+
+        -- Check if suffix is longer than the string
+        if #suffix > #str then
+            return false
+        end
+
+        -- Compare the end of the string with the suffix
+        return str:sub(- #suffix) == suffix
+    end
+    return msg.from == id and ends_with(action, "response")
+end, function(msg)
+
+end)
+
+-- Dump for errors
+Handlers.add("error", function(msg) end)
+
+local function update_server(msg)
+    local senderId = msg.from
+
+    -- serverPublic parameter removed
+    local serverName = utils.var_or_nil(msg["server-name"])
+    local serverDescription = utils.var_or_nil(msg["server-description"])
+    local serverPfp = utils.var_or_nil(msg["server-pfp"])
+    local serverBanner = utils.var_or_nil(msg["server-banner"])
+
+    -- validate senderId permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+    assert(utils.permissions.member_has(senderMember, helpers.permissions.manage_server),
+        "403|insufficient permissions to update server")
+
+    local profile = server.profile
+    -- profile.public_server field removed
+    profile.name = serverName or profile.name
+    profile.description = serverDescription or profile.description
+    profile.pfp = serverPfp or profile.pfp
+    profile.banner = serverBanner or profile.banner
+
+    server.profile = profile
+
+    -- send updates to subspace as well
+    send({
+        target = subspace_id,
+        action = "update-server",
+        -- server-public parameter removed
+        ["server-name"] = serverName,
+        ["server-description"] = serverDescription,
+        ["server-pfp"] = serverPfp,
+        ["server-banner"] = serverBanner
+    })
+
+    msg.reply({
+        action = "update-server-response",
+        status = helpers.status.success,
+        data = json.encode(server)
+    })
+end
+
+Handlers.add("update-server", function(msg)
+    utils.handle_run(update_server, msg)
 end)
 
 --#endregion
@@ -547,7 +631,7 @@ local function add_member(msg)
 
     role_utils.assign("@", userId)
 
-    server.member_count = server.member_count + 1
+    server.member_count = math.max(server.member_count + 1, 0)
 
     -- Push event to subscribers
     push_event({
@@ -557,9 +641,11 @@ local function add_member(msg)
         timestamp = os.time()
     })
 
-    msg.reply({
-        action = "add-member-response",
+    send({
+        target = subspace_id,
+        action = "approve-add-member",
         status = helpers.status.success,
+        ["user-id"] = userId,
     })
 end
 
@@ -594,7 +680,7 @@ local function remove_member(msg)
         members[userId] = nil
     end
 
-    server.member_count = server.member_count - 1
+    server.member_count = math.max(server.member_count - 1, 0)
 
     -- Push event to subscribers
     push_event({
@@ -605,7 +691,9 @@ local function remove_member(msg)
     })
 
     msg.reply({
+        target = subspace_id,
         action = "remove-member-response",
+        ["user-id"] = userId,
         status = helpers.status.success,
     })
 end
@@ -696,7 +784,7 @@ local function kick_member(msg)
     end
 
     -- Decrement member count
-    server.member_count = server.member_count - 1
+    server.member_count = math.max(server.member_count - 1, 0)
 
     -- Push event to subscribers
     push_event({
@@ -767,7 +855,7 @@ local function ban_member(msg)
     helpers.bans[userId] = true
 
     -- Decrement member count
-    server.member_count = server.member_count - 1
+    server.member_count = math.max(server.member_count - 1, 0)
 
     -- Push event to subscribers
     push_event({

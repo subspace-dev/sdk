@@ -2,7 +2,7 @@ local json = require("json")
 
 --#region configuration
 
-subspace_id = "WSeRkeXPzE_Zckh3w6wghWKGZ_7Lm9U61qXj_JSdujo"
+subspace_id = "<<SUBSPACE>>"
 
 --#endregion
 
@@ -103,7 +103,8 @@ local utils = {
     end,
     handle_run = function(func, msg)
         msg.reply = function(data)
-            data.target = msg.from
+            -- data.target = msg.from
+            data.target = id -- temporary
             if not data["x-status"] then data["x-status"] = helpers.status.success end
             send(data)
         end
@@ -120,7 +121,8 @@ local utils = {
             table.insert(helpers.logs, error_item)
             pprint(error_item)
             send({
-                target = msg.from,
+                -- target = msg.from,
+                target = id, -- temporary
                 action = "error",
                 ["x-status"] = res.status,
                 ["x-error"] = res.error,
@@ -217,6 +219,36 @@ end
 Handlers.once("setup", function(msg)
     utils.handle_run(setup, msg)
 end)
+
+-- Since HB doesnot know yet if a target is a wallet or process and errors out
+-- Instead of sending reply to wallet, dump it to self, to make sure it is still readable in frontend
+Handlers.add("dump", function(msg)
+    local action = msg.action
+    local function ends_with(str, suffix)
+        -- Handle edge cases
+        if not str or not suffix then
+            return false
+        end
+
+        -- Convert to strings if they aren't already
+        str = tostring(str)
+        suffix = tostring(suffix)
+
+        -- Check if suffix is longer than the string
+        if #suffix > #str then
+            return false
+        end
+
+        -- Compare the end of the string with the suffix
+        return str:sub(- #suffix) == suffix
+    end
+    return msg.from == id and ends_with(action, "response")
+end, function(msg)
+
+end)
+
+-- Dump for errors
+Handlers.add("error", function(msg) end)
 
 --#endregion
 

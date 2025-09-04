@@ -1,344 +1,247 @@
-import { connect } from "@permaweb/aoconnect";
-import { AoSigner, MessageResult, ReadOptions, Tag, TagsKV, WriteOptions, WriteResult } from "../types/ao";
-import { logger } from "./logger";
+import { connect } from "@permaweb/aoconnect"
+import { log, withDuration } from "./logger";
+import { Constants } from "./constants";
+
+interface MainnetOptions {
+    GATEWAY_URL: string;
+    HB_URL: string;
+    signer?: any;
+    address?: string;
+}
+
+interface WriteResponse {
+    info: string
+    commitments: Array<Record<string, any>>
+    outbox: Array<Record<string, any>>
+    output: { data: any, prompt: string }
+    process: string
+    slot: number
+    status: number
+    error: ErrorResponse
+}
+
+export interface ErrorResponse {
+    'x-action': string
+    'x-error': string
+    'x-status': number
+    timestamp: number
+}
+
+export class WriteError extends Error {
+    public action: string
+    public status: number
+    public timestamp: number
+    public error: ErrorResponse
+
+    constructor(error: ErrorResponse) {
+        super(JSON.stringify(error, null, 2))
+        this.action = error["x-action"]
+        this.status = error["x-status"]
+        this.timestamp = error.timestamp
+        this.error = error
+    }
+}
 
 export class AO {
-    readonly CU_URL: string
-    readonly GATEWAY_URL: string
-    readonly ao: any
-    private signer: AoSigner
-    readonly writable: boolean
-    readonly owner: string
+    public hbUrl: string;
+    public gatewayUrl: string;
+    private signer?: any;
+    public address?: string;
 
-    constructor(params: Partial<{ CU_URL: string, GATEWAY_URL: string, signer: AoSigner, Owner: string }> = {}) {
-        const cuUrl = params?.CU_URL
-        const gatewayUrl = params?.GATEWAY_URL
-
-        this.ao = connect({ MODE: "legacy", CU_URL: cuUrl, GATEWAY_URL: gatewayUrl })
-        this.signer = params.signer
-        if (this.signer) {
-            this.writable = true
-        } else {
-            this.writable = false
-        }
-        this.owner = params.Owner || "NA"
+    constructor(params: MainnetOptions) {
+        this.hbUrl = params.HB_URL || "https://scheduler.forward.computer";
+        this.gatewayUrl = params.GATEWAY_URL || "https://arweave.net";
+        this.signer = params.signer;
+        this.address = params.address;
     }
 
-    async read(params: ReadOptions): Promise<TagsKV> {
-        const operationId = Math.random().toString(36).substring(2, 15);
-        const startTime = Date.now();
-
-        logger.operationStart("AO", `READ_${operationId}`, {
-            process: params.process,
-            action: params.action,
-            owner: params.owner || this.owner,
-            hasData: !!params.data,
-            tagCount: params.tags ? Object.keys(params.tags).length : 0
-        });
-
-        const dryrunInput: any = {
-            process: params.process
-        }
-
-        if (params.data) {
-            dryrunInput['data'] = params.data
-        }
-
-        if (params.tags) {
-            if (params.action) {
-                params.tags['Action'] = params.action
-            }
-            dryrunInput['tags'] = Object.entries(params.tags).map(([key, value]) => ({ name: key, value: value.toString() }))
-        } else {
-            if (params.action) {
-                dryrunInput['tags'] = [{ name: 'Action', value: params.action }]
-            }
-        }
-
-        dryrunInput['Owner'] = params.owner || this.owner
-
-        if (!params.retries) params.retries = 3
-
-        let attempts = 0;
-        let response: TagsKV | undefined = undefined
-        let result: MessageResult | undefined = undefined
-
-        while (attempts < params.retries) {
-            try {
-                logger.requestSent("AO", `READ_${operationId}`, dryrunInput.process, {
-                    attempt: attempts + 1,
-                    maxRetries: params.retries,
-                    action: params.action,
-                    owner: dryrunInput.Owner
-                });
-
-                result = await this.ao.dryrun(dryrunInput)
-
-                logger.responseReceived("AO", `READ_${operationId}`, dryrunInput.process, !result?.Error, {
-                    attempt: attempts + 1,
-                    hasError: !!result?.Error,
-                    messageCount: result?.Messages?.length || 0
-                });
-
-                break
-            } catch (e) {
-                logger.error("AO", `READ_${operationId} attempt ${attempts + 1} failed`, e);
-                attempts++
-                if (attempts < params.retries) {
-                    const delay = 2 ** attempts * 1000;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    logger.warn('AO', `READ_${operationId} retrying in ${delay}ms (${attempts + 1}/${params.retries})`);
-                }
-            }
-        }
-
-        const duration = Date.now() - startTime;
-
-        if (!result) {
-            logger.operationError("AO", `READ_${operationId}`, new Error("Read Failed - No result after retries"), duration);
-            throw new Error(`Read Failed\nInputs: ${JSON.stringify(params, null, 2)}`)
-        }
-
-        if (result.Error) {
-            logger.operationError("AO", `READ_${operationId}`, new Error(`Read Error: ${result.Error}`), duration);
-            throw new Error(`Read Error\n${JSON.stringify(result, null, 2)}\nInputs:${JSON.stringify(params, null, 2)}`)
-        }
-
-        if (!result.Messages || result.Messages.length == 0) {
-            logger.operationError("AO", `READ_${operationId}`, new Error("Read Failed - No messages returned"), duration);
-            throw new Error(`Read Failed, No messages returned\nInputs: ${JSON.stringify(params, null, 2)}`)
-        }
-
-        if (result.Messages.length > 1) {
-            logger.operationError("AO", `READ_${operationId}`, new Error("Read Failed - Multiple messages returned"), duration);
-            throw new Error(`Read Failed, Multiple messages returned\n${JSON.stringify(result.Messages, null, 2)}\nInputs: ${JSON.stringify(params, null, 2)}`)
-        }
-
-        const msg = result.Messages[0]
-
-        // Array to KeyValue
-        const tags = (msg.Tags as Tag[]).reduce((acc, tag) => {
-            acc[tag.name] = tag.value
-            return acc
-        }, {} as Record<string, string>)
-
-        response = tags
-
-        // Data will always be a json string
-        if (msg.Data) {
-            tags['Data'] = msg.Data
-        }
-
-        if (tags['Status'] != "200") {
-            logger.operationError("AO", `READ_${operationId}`, new Error(`Status ${tags['Status']}`), duration);
-            throw new Error(`Status ${tags['Status']}\n${JSON.stringify(response, null, 2)}\nInputs: ${JSON.stringify(params, null, 2)}`)
-        }
-
-        logger.operationSuccess("AO", `READ_${operationId}`, {
-            status: tags['Status'],
-            hasData: !!tags['Data'],
-            responseTagCount: Object.keys(tags).length,
-            attempts: attempts + 1
-        }, duration);
-
-        return response
+    public ao() {
+        return connect({
+            MODE: "mainnet",
+            URL: this.hbUrl,
+            GATEWAY_URL: this.gatewayUrl,
+            signer: this.signer,
+            device: "process@1.0",
+        })
     }
 
-    async write(params: WriteOptions): Promise<WriteResult> {
-        const operationId = Math.random().toString(36).substring(2, 15);
-        const startTime = Date.now();
+    sanitizeResponse(input: Record<string, any>) {
+        const blockedKeys = new Set<string>([
+            'accept',
+            'accept-bundle',
+            'accept-encoding',
+            'accept-language',
+            'connection',
+            'commitments',
+            'device',
+            'host',
+            'method',
+            'priority',
+            'status',
+            'sec-ch-ua',
+            'sec-ch-ua-mobile',
+            'sec-ch-ua-platform',
+            'sec-fetch-dest',
+            'sec-fetch-mode',
+            'sec-fetch-site',
+            'sec-fetch-user',
+            'sec-gpc',
+            'upgrade-insecure-requests',
+            'user-agent',
+            'x-forwarded-for',
+            'x-forwarded-proto',
+            'x-real-ip',
+            'origin',
+            'referer',
+            'cdn-loop',
+            'cf-connecting-ip',
+            'cf-ipcountry',
+            'cf-ray',
+            'cf-visitor',
+            'remote-host',
+        ])
+        return Object.fromEntries(
+            Object.entries(input).filter(([key]) => !blockedKeys.has(key))
+        );
+    }
 
-        logger.operationStart("AO", `WRITE_${operationId}`, {
-            process: params.process,
-            action: params.action,
-            hasData: !!params.data,
-            tagCount: params.tags ? Object.keys(params.tags).length : 0,
-            hasSigner: !!(params.signer || this.signer)
-        });
-
-        const signer = params.signer || this.signer
-
-        if (!signer) {
-            const duration = Date.now() - startTime;
-            logger.operationError("AO", `WRITE_${operationId}`, new Error("No signer provided"), duration);
-            throw new Error("No signer provided. A signer is required for write operations.")
+    checkErrors(e: WriteResponse): WriteResponse {
+        const errMessage = this.matchAction<ErrorResponse>("error", e)
+        if (errMessage) {
+            e.error = errMessage
         }
+        return e
+    }
 
-        const writeInput: any = {
-            process: params.process,
-            signer: signer
+    matchAction<T>(action: string, e: WriteResponse): T | null {
+        const outbox = e.outbox
+        if (!Array.isArray(outbox)) return null
+
+        if (outbox.length === 0) return null
+        const message = outbox.find(o => o['action'] === action)
+        if (!message) return null
+        if (message.data) {
+            return JSON.parse(message.data) as T
         }
+        return message as T
+    }
 
-        if (params.data) {
-            writeInput['data'] = params.data
-        }
+    async operator(): Promise<string> {
+        const hashpath = this.hbUrl + '/~meta@1.0/info/address'
+        log({ type: "input", label: "Fetching Operator Address", data: hashpath })
+        const { result, duration } = await withDuration(() => fetch(hashpath))
+        const scheduler = (await result.text()).trim()
+        log({ type: "success", label: "Fetched Operator Address", data: scheduler, duration })
+        return scheduler
+    }
 
-        if (params.tags) {
-            if (params.action) {
-                params.tags['Action'] = params.action
+    async read<T>({ path }: { path: string }): Promise<T> {
+        let hashpath = this.hbUrl + (path.startsWith("/") ? path : "/" + path)
+        // hashpath = hashpath + "/~json@1.0/serialize"
+
+        log({ type: "input", label: "Reading Process State", data: hashpath })
+        const { result, duration } = await withDuration(() => fetch(hashpath, {
+            headers: {
+                'accept': "application/json",
+                'accept-bundle': 'true',
             }
-            writeInput['tags'] = Object.entries(params.tags).map(([key, value]) => ({ name: key, value: value.toString() }))
-        } else {
-            if (params.action) {
-                writeInput['tags'] = [{ name: 'Action', value: params.action }]
-            }
+        }))
+        if (result.status == 404) {
+            log({ type: "error", label: "404 Not Found", data: hashpath, duration })
+            return null
+        }
+        const resultJson = await result.json()
+        log({ type: "output", label: "Process State Read", data: resultJson, duration })
+        return this.sanitizeResponse(resultJson) as T
+    }
+
+    async write({ processId, tags, data }: { processId: string, tags?: { name: string; value: string }[], data?: any }): Promise<WriteResponse | null> {
+        const params: any = {
+            path: `/${processId}/push`,
+            method: 'POST',
+            type: 'Message',
+            'data-protocol': 'ao',
+            variant: 'ao.N.1',
+            target: processId,
+            'signing-format': 'ANS-104',
+            accept: 'application/json',
+            'accept-bundle': "true",
         }
 
-        if (!params.retries) params.retries = 3
-
-        let attempts = 0
-        let messageId: string | undefined = undefined
-
-        // Phase 1: Send message
-        while (attempts < params.retries) {
-            try {
-                logger.requestSent("AO", `WRITE_${operationId}_MESSAGE`, writeInput.process, {
-                    phase: "MESSAGE",
-                    attempt: attempts + 1,
-                    maxRetries: params.retries,
-                    action: params.action
-                });
-
-                messageId = await this.ao.message(writeInput)
-
-                logger.responseReceived("AO", `WRITE_${operationId}_MESSAGE`, writeInput.process, !!messageId, {
-                    phase: "MESSAGE",
-                    attempt: attempts + 1,
-                    messageId,
-                    success: !!messageId
-                });
-
-                break
-            } catch (e) {
-                logger.error("AO", `WRITE_${operationId} message attempt ${attempts + 1} failed`, e);
-                attempts++
-                if (attempts < params.retries) {
-                    const delay = 2 ** attempts * 1000;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    logger.warn('AO', `WRITE_${operationId} message retrying in ${delay}ms (${attempts + 1}/${params.retries})`);
-                }
-            }
+        if (tags) {
+            tags.forEach(tag => {
+                params[tag.name] = tag.value
+            })
         }
 
-        if (!messageId) {
-            const duration = Date.now() - startTime;
-            logger.operationError("AO", `WRITE_${operationId}`, new Error("Write Failed - No message ID after retries"), duration);
-            throw new Error(`Write Failed\nInputs: ${JSON.stringify(params, null, 2)}`)
+        if (data) {
+            params.data = data
         }
 
-        // Phase 2: Get result
-        attempts = 0
-        let response: TagsKV | undefined = undefined
-        let result: MessageResult | undefined = undefined
+        log({ type: "input", label: "Write Input", data: params })
+        const { result, duration } = await withDuration(() => this.ao().request(params))
+        let res = this.checkErrors(await JSON.parse((result as any).body) as WriteResponse)
+        log({ type: res.error ? "error" : "output", label: res.error ? "Write Error" : "Write Success", data: res, duration })
+        if (res.error) {
+            throw new WriteError(res.error)
+        }
+        return res
+    }
 
-        while (attempts < params.retries) {
-            try {
-                logger.requestSent("AO", `WRITE_${operationId}_RESULT`, params.process, {
-                    phase: "RESULT",
-                    attempt: attempts + 1,
-                    maxRetries: params.retries,
-                    messageId
-                });
+    async runLua({ processId, code }: { processId: string, code: string }): Promise<WriteResponse> {
+        log({ type: "debug", label: "Run Lua Input", data: { processId, code } })
+        const { result, duration } = await withDuration(() => this.write({
+            processId,
+            tags: [
+                { name: "Action", value: "Eval" }
+            ],
+            data: code
+        }))
+        log({ type: "success", label: "Run Lua Output", data: result, duration })
+        return result as WriteResponse
+    }
 
-                result = await this.ao.result({ process: params.process, message: messageId })
-
-                logger.responseReceived("AO", `WRITE_${operationId}_RESULT`, params.process, !result?.Error, {
-                    phase: "RESULT",
-                    attempt: attempts + 1,
-                    hasError: !!result?.Error,
-                    messageCount: result?.Messages?.length || 0
-                });
-
-                break
-            } catch (e) {
-                logger.error("AO", `WRITE_${operationId} result attempt ${attempts + 1} failed`, e);
-                attempts++
-                if (attempts < params.retries) {
-                    const delay = 2 ** attempts * 1000;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    logger.warn('AO', `WRITE_${operationId} result retrying in ${delay}ms (${attempts + 1}/${params.retries})`);
-                }
-            }
+    async spawn({ tags, data, module_ }: { tags?: { name: string; value: string }[], data?: any, module_?: string }): Promise<string> {
+        const params: any = {
+            path: '/push',
+            method: 'POST',
+            type: 'Process',
+            device: 'process@1.0',
+            'scheduler-device': 'scheduler@1.0',
+            'push-device': 'push@1.0',
+            'execution-device': 'lua@5.3a',
+            'data-protocol': 'ao',
+            variant: 'ao.N.1',
+            random: Math.random().toString(),
+            authority: await this.operator() + ',' + Constants.authority,
+            'signing-format': 'ANS-104',
+            module: module_ || Constants.hyperAosModule,
+            scheduler: await this.operator(),
+            accept: 'application/json',
         }
 
-        const duration = Date.now() - startTime;
-
-        if (!result) {
-            logger.error("AO", `WRITE_${operationId} failed to read result for message ${messageId}`);
-            logger.operationSuccess("AO", `WRITE_${operationId}`, {
-                messageId,
-                resultStatus: "PARTIAL",
-                note: "Message sent but result could not be retrieved"
-            }, duration);
-            return { id: messageId }
+        if (tags) {
+            tags.forEach(tag => {
+                params[tag.name] = tag.value
+            })
         }
 
-        if (result.Error) {
-            logger.operationError("AO", `WRITE_${operationId}`, new Error(`Write Error: ${result.Error}`), duration);
-            throw new Error(`Write Error\n${JSON.stringify(result, null, 2)}\nInputs:${JSON.stringify(params, null, 2)}`)
+        if (data) {
+            params.data = data
         }
 
-        if (!result.Messages || result.Messages.length == 0) {
-            logger.operationError("AO", `WRITE_${operationId}`, new Error("Write Failed - No messages returned"), duration);
-            throw new Error(`Write Failed, No messages returned\nInputs: ${JSON.stringify(params, null, 2)}`)
-        }
-
-        let msg = result.Messages[0]
-
-        if (result.Messages.length > 1) {
-            logger.debug("AO", `WRITE_${operationId} multiple messages returned, finding Action-Response`, {
-                messageCount: result.Messages.length
-            });
-
-            // find the message with `Action-Response` like tag
-            for (const msg_ of result.Messages) {
-                const tags = (msg_.Tags as Tag[]).reduce((acc, tag) => {
-                    acc[tag.name] = tag.value
-                    return acc
-                }, {} as Record<string, string>)
-                const action = tags['Action']
-                if (action.endsWith("Response")) {
-                    msg = msg_
-                    logger.debug("AO", `WRITE_${operationId} found Action-Response message`, {
-                        action
-                    });
-                }
-            }
-        }
-
-        const tags = (msg.Tags as Tag[]).reduce((acc, tag) => {
-            acc[tag.name] = tag.value
-            return acc
-        }, {} as Record<string, string>)
-
-        response = tags
-
-        // Data will always be a json string
+        log({ type: "input", label: "Spawning Process", data: params })
+        // const { result, duration } = await withDuration(() => this.ao().request(params))
         try {
-            const data = JSON.parse(msg.Data as string)
-            response['Data'] = data
+            const result = await this.ao().request(params)
+            log({ type: "success", label: "Process Spawned", data: result })
+            const process = (result as any).process
+            await new Promise(resolve => setTimeout(resolve, 100))
+            const { result: result2, duration: duration2 } = await withDuration(() => this.runLua({ processId: process, code: "require('.process')._version" }))
+            log({ type: "success", label: "Process Initialized", data: { version: result2 }, duration: duration2 })
+            return process
         } catch (e) {
-            logger.error("AO", `WRITE_${operationId} failed to parse response data`, e);
-            response['Data'] = msg.Data
-        }
-
-        if (tags['Status'] != "200") {
-            logger.operationError("AO", `WRITE_${operationId}`, new Error(`Status ${tags['Status']}`), duration);
-            throw new Error(`Status ${tags['Status']}\n${JSON.stringify(response, null, 2)}\nInputs: ${JSON.stringify(params, null, 2)}`)
-        }
-
-        logger.operationSuccess("AO", `WRITE_${operationId}`, {
-            messageId,
-            status: tags['Status'],
-            hasData: !!response['Data'],
-            responseTagCount: Object.keys(tags).length,
-            resultStatus: "COMPLETE"
-        }, duration);
-
-        return {
-            id: messageId,
-            tags: response,
-            data: response['Data']
+            throw e
         }
     }
 }

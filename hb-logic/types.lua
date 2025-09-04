@@ -25,7 +25,7 @@
 --- @field description string
 --- @field pfp string
 --- @field banner string
---- @field public_server boolean
+-- @field public_server boolean -- field removed
 
 --- @class Member -- server member/bot member
 --- @field id string
@@ -73,7 +73,7 @@
 --- @field content_type string
 
 --- Event values from helpers.events
---- @alias Event 10|20|30|40|50|60|70|80|90|100|110|120|130|140|150|160|170
+--- @alias ServerEvent 10|20|30|40|50|60|70|80|90|100|110|120|130|140|150|160|170
 
 --- @class Notification
 --- @field id string
