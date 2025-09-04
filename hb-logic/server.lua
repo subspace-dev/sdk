@@ -2,7 +2,7 @@ local json = require("json")
 
 --#region configuration
 
-subspace_id = "<<SUBSPACE>>"
+subspace_id = subspace_id or "<<SUBSPACE>>"
 
 --#endregion
 
@@ -112,13 +112,13 @@ local uncategorised_channel_id = get_id()
 local categorised_channel_id = get_id()
 
 --- @type table<string, Member>
-members = {}
+members = members or {}
 
 --- @type table<string, Member>
-bots = {}
+bots = bots or {}
 
 --- @type table<string, Message>
-messages = {}
+messages = messages or {}
 
 server = server or {
     --- @type Server
@@ -235,16 +235,23 @@ local member_utils = {
         local m = members[memberId] or bots[memberId]
         if not m then return nil end
 
-        -- Populate role objects
-        for _, rid in pairs(m.roles) do
-            if type(rid) == "string" then
-                m.roles[rid] = role_utils.get(rid)
+        -- Create a copy to avoid modifying stored data
+        local member_copy = {}
+        for k, v in pairs(m) do
+            if k == "roles" then
+                -- Copy roles table without modification
+                member_copy.roles = {}
+                for roleId, roleData in pairs(v) do
+                    member_copy.roles[roleId] = roleData
+                end
+            else
+                member_copy[k] = v
             end
         end
 
         -- Ensure is_bot flag is set correctly
-        m.is_bot = bots[memberId] ~= nil
-        return m
+        member_copy.is_bot = bots[memberId] ~= nil
+        return member_copy
     end,
     --- @param memberId string
     --- @param member Member|nil
@@ -283,12 +290,10 @@ local permission_utils = {
     --- @return number -- Returns the highest role order for the member
     get_highest_role_order = function(member)
         local highest_order = 0
-        for _, roleId in pairs(member.roles) do
-            if type(roleId) == "string" then
-                local role = role_utils.get(roleId)
-                if role and role.order > highest_order then
-                    highest_order = role.order
-                end
+        for roleId, _ in pairs(member.roles) do
+            local role = role_utils.get(roleId)
+            if role and type(role.order) == "number" and role.order > highest_order then
+                highest_order = role.order
             end
         end
         return highest_order
@@ -298,14 +303,10 @@ local permission_utils = {
     --- @return boolean
     member_has = function(member, permission)
         local perm_int = 0
-        for _, roleId in pairs(member.roles) do
-            if type(roleId) == "string" then
-                local role = role_utils.get(roleId)
-                if role then
-                    perm_int = perm_int | role.permissions
-                end
-            else
-                perm_int = perm_int | roleId
+        for roleId, _ in pairs(member.roles) do
+            local role = role_utils.get(roleId)
+            if role and type(role.permissions) == "number" then
+                perm_int = perm_int | role.permissions
             end
         end
 
@@ -324,21 +325,17 @@ local permission_utils = {
     --- @param permission number
     --- @return boolean
     role_has = function(role, permission)
-        return role.permissions & permission == permission
+        return (role.permissions or 0) & permission == permission
     end,
     --- @param member Member
     --- @param permissions table<number> -- Array of permissions to check (OR logic)
     --- @return boolean
     member_has_any = function(member, permissions)
         local perm_int = 0
-        for _, roleId in pairs(member.roles) do
-            if type(roleId) == "string" then
-                local role = role_utils.get(roleId)
-                if role then
-                    perm_int = perm_int | role.permissions
-                end
-            else
-                perm_int = perm_int | roleId
+        for roleId, _ in pairs(member.roles) do
+            local role = role_utils.get(roleId)
+            if role and type(role.permissions) == "number" then
+                perm_int = perm_int | role.permissions
             end
         end
 
@@ -623,12 +620,10 @@ local function add_member(msg)
         is_bot = isBot or false,
     }
 
-    if isBot then
-        bots[userId] = memberData
-    else
-        members[userId] = memberData
-    end
+    -- Use utils.members.set to properly update the members table
+    utils.members.set(userId, memberData)
 
+    -- Assign the @everyone role using role_utils
     role_utils.assign("@", userId)
 
     server.member_count = math.max(server.member_count + 1, 0)
@@ -666,10 +661,8 @@ local function remove_member(msg)
     local isBot = member.is_bot
 
     -- Remove all roles first
-    for _, roleId in pairs(member.roles) do
-        if type(roleId) == "string" then
-            role_utils.unassign(roleId, userId)
-        end
+    for roleId, _ in pairs(member.roles) do
+        role_utils.unassign(roleId, userId)
     end
     role_utils.unassign("@", userId)
 
@@ -769,10 +762,8 @@ local function kick_member(msg)
     local isBot = member.is_bot
 
     -- Remove all roles first
-    for _, roleId in pairs(member.roles) do
-        if type(roleId) == "string" then
-            role_utils.unassign(roleId, userId)
-        end
+    for roleId, _ in pairs(member.roles) do
+        role_utils.unassign(roleId, userId)
     end
     role_utils.unassign("@", userId)
 
@@ -837,10 +828,8 @@ local function ban_member(msg)
     local isBot = member.is_bot
 
     -- Remove all roles first
-    for _, roleId in pairs(member.roles) do
-        if type(roleId) == "string" then
-            role_utils.unassign(roleId, userId)
-        end
+    for roleId, _ in pairs(member.roles) do
+        role_utils.unassign(roleId, userId)
     end
     role_utils.unassign("@", userId)
 
@@ -1570,6 +1559,11 @@ local function send_message(msg)
 
     -- Validate attachments if present
     if attachments and #attachments > 0 then
+        if type(attachments) ~= "table" then
+            local success, decoded = pcall(json.decode, attachments)
+            assert(success, "400|invalid attachments format")
+            attachments = decoded
+        end
         -- Check if member has attachment permissions
         if channel.allow_attachments == 0 then
             assert(utils.permissions.member_has_any(senderMember, {
@@ -1602,6 +1596,7 @@ local function send_message(msg)
         edited_timestamp = nil,
     }
 
+    -- TODO
     -- Store message (in a real implementation, you'd want a proper message storage system)
     -- For now, we'll just acknowledge the message was sent
 

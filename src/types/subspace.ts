@@ -23,13 +23,18 @@ export interface IBot {
 }
 
 export interface IServer {
-    id: string;
-    owner: string;
-    name: string;
-    description: string;
-    pfp: string;
-    banner: string;
-    public_server: boolean;
+    categories: Record<string, ICategory>;
+    channels: Record<string, IChannel>;
+    roles: Record<string, IRole>;
+    member_count: number;
+    profile: {
+        banner: string;
+        description: string;
+        id: string;
+        name: string;
+        owner: string;
+        pfp: string;
+    };
 }
 
 export interface IMember {

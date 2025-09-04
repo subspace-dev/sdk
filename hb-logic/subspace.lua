@@ -663,31 +663,57 @@ local function join_server(msg)
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
 
+    local alreadyMember = false
+    local needsServerUpdate = false
+
     if isBot then
         local bot = utils.bots.get(userId)
         assert(bot, "404|bot not found")
-        bot.servers[serverId] = { approved = false }
-        utils.bots.set(userId, bot)
+        -- Check if already approved
+        if bot.servers[serverId] and bot.servers[serverId].approved then
+            alreadyMember = true
+        else
+            -- Either not in server or not approved yet
+            if not bot.servers[serverId] then
+                needsServerUpdate = true
+            end
+            bot.servers[serverId] = { approved = false }
+            utils.bots.set(userId, bot)
+        end
     else
         local profile = utils.profiles.get(userId)
         assert(profile, "404|profile not found")
-        profile.servers[serverId] = {
-            order_id = utils.servers.get_next_order_id(profile),
-            approved = false
-        }
-        utils.profiles.set(userId, profile)
-        utils.servers.reorder_servers(profile)
+        -- Check if already approved
+        if profile.servers[serverId] and profile.servers[serverId].approved then
+            alreadyMember = true
+        else
+            -- Either not in server or not approved yet
+            if not profile.servers[serverId] then
+                needsServerUpdate = true
+            end
+            profile.servers[serverId] = {
+                order_id = utils.servers.get_next_order_id(profile),
+                approved = false
+            }
+            utils.profiles.set(userId, profile)
+            utils.servers.reorder_servers(profile)
+        end
     end
 
+    -- Only send add-member to server if user is not already a member
+    -- if not alreadyMember and needsServerUpdate then
     send({
         target      = serverId,
         action      = "add-member",
         ["user-id"] = userId,
         ["is-bot"]  = isBot,
     })
+    -- end
+
+    local responseStatus = alreadyMember and helpers.status.success or helpers.status.accepted
     msg.reply({
         action = "join-server-response",
-        status = helpers.status.accepted,
+        status = responseStatus,
     })
 end
 
@@ -913,7 +939,7 @@ local function send_dm(msg)
     local senderId = msg.from
     local receiverId = utils.var_or_nil(msg["receiver-id"])
     local content = utils.var_or_nil(msg["content"])
-    local messageId = utils.get_message_id_from_commitments(msg) or utils.var_or_nil(msg["message-id"]) or utils.get_id()
+    local messageId = utils.get_message_id_from_commitments(msg) or utils.get_id()
     local timestamp = utils.var_or_nil(msg["timestamp"]) or tostring(os.time())
 
     assert(receiverId, "400|receiver-id is required")
@@ -981,7 +1007,7 @@ end)
 local function edit_dm(msg)
     local senderId = msg.from
     local receiverId = utils.var_or_nil(msg["receiver-id"])
-    local messageId = utils.get_message_id_from_commitments(msg) or utils.var_or_nil(msg["message-id"])
+    local messageId = utils.var_or_nil(msg["message-id"])
     local content = utils.var_or_nil(msg["content"])
 
     assert(receiverId, "400|receiver-id is required")

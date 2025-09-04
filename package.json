@@ -12,9 +12,9 @@
       "types": "./dist/types/index.d.ts"
     },
     "./types": {
-      "import": "./dist/esm/types/subspace.js",
-      "require": "./dist/cjs/types/subspace.js",
-      "types": "./dist/types/types/subspace.d.ts"
+      "import": "./dist/esm/types/index.js",
+      "require": "./dist/cjs/types/index.js",
+      "types": "./dist/types/types/index.d.ts"
     }
   },
   "files": [

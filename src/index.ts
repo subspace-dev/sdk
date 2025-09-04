@@ -88,6 +88,10 @@ export class Subspace {
 
 export { SubspaceProfiles } from "./managers/profiles"
 export { SubspaceServers } from "./managers/server"
+export { SubspaceValidation, ValidationError } from "./utils/validation"
+
+// Export Inputs namespace
+// export { Inputs } from "./types"
 
 import { log, withDuration } from "./utils/logger"
 const Utils = { log, withDuration }

@@ -65,6 +65,13 @@ export class AO {
         })
     }
 
+    validateArweaveId(id: string): string {
+        if (!/^[A-Za-z0-9_-]{43}$/.test(id)) {
+            throw new Error('Invalid Arweave transaction ID');
+        }
+        return id;
+    }
+
     sanitizeResponse(input: Record<string, any>) {
         const blockedKeys = new Set<string>([
             'accept',
@@ -146,9 +153,9 @@ export class AO {
                 'accept-bundle': 'true',
             }
         }))
-        if (result.status == 404) {
-            log({ type: "error", label: "404 Not Found", data: hashpath, duration })
-            return null
+        if (result.status != 200) {
+            log({ type: "error", label: `Error ${result.status} ${result.statusText}`, data: hashpath, duration })
+            throw new Error(`Error ${result.status} ${result.statusText}`)
         }
         const resultJson = await result.json()
         log({ type: "output", label: "Process State Read", data: resultJson, duration })

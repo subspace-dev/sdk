@@ -6,7 +6,7 @@ const CommonTags: Tag[] = [
 ]
 
 export const Constants = {
-    subspaceProcess: "jJOcFiMpyOsLTDzbufUwjfc-ib4JyEQ6vDQ00pQFHb8",
+    subspaceProcess: "E_AkaV9Aq7WmGkNcINP-rrwjzCrgeDksEvyw8zBi9Cc",
     hyperAosModule: "xVcnPK8MPmcocS6zwq1eLmM2KhfyarP8zzmz3UVi1g4",
     authority: "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY",
 
