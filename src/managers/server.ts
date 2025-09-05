@@ -2,8 +2,27 @@
 import { Subspace, SubspaceProfiles } from "..";
 import type { IProfile, IMember, IServer, Tag, ICategory, IChannel, IRole, IMessage } from "../types/subspace";
 import type {
+    ICreateCategory,
+    ICreateChannel,
+    ICreateRole,
     ICreateServer,
+    IDeleteCategory,
+    IDeleteChannel,
+    IDeleteRole,
+    IAssignRole,
+    IUpdateCategory,
+    IUpdateChannel,
+    IUpdateRole,
     IUpdateServer,
+    IUnassignRole,
+    ISendMessage,
+    IUpdateMessage,
+    IDeleteMessage,
+    IUpdateMember,
+    IKickMember,
+    IBanMember,
+    IUnbanMember,
+    IGetMember,
 } from "../types/inputs";
 import { Constants } from "../utils/constants";
 import { log } from "../utils/logger";
@@ -105,6 +124,15 @@ export class SubspaceServers {
         return members
     }
 
+    public static async getServerMember({ serverId, userId }: IGetMember): Promise<IMember> {
+        // Validate server ID
+        SubspaceValidation.validateServerId(serverId);
+        SubspaceValidation.validateUserId(userId);
+
+        const member = await Subspace.ao().read<IMember>({ path: `/${serverId}/now/members/${userId}` })
+        return this.formatMember(member)
+    }
+
     public static async updateServer({ serverId, serverName, serverDescription, serverPfp, serverBanner }: IUpdateServer): Promise<IServer> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
@@ -155,7 +183,7 @@ export class SubspaceServers {
 
     //#region categories
 
-    public static async createCategory({ serverId, categoryName, categoryOrder }: { serverId: string, categoryName: string, categoryOrder?: number }): Promise<ICategory> {
+    public static async createCategory({ serverId, categoryName, categoryOrder }: ICreateCategory): Promise<ICategory> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateCategoryParams({ categoryName, categoryOrder });
@@ -171,7 +199,7 @@ export class SubspaceServers {
         return category
     }
 
-    public static async updateCategory({ serverId, categoryId, categoryName, categoryOrder }: { serverId: string, categoryId: string, categoryName?: string, categoryOrder?: number }): Promise<ICategory> {
+    public static async updateCategory({ serverId, categoryId, categoryName, categoryOrder }: IUpdateCategory): Promise<ICategory> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateCategoryId(categoryId);
@@ -195,7 +223,7 @@ export class SubspaceServers {
         return category
     }
 
-    public static async deleteCategory({ serverId, categoryId }: { serverId: string, categoryId: string }): Promise<boolean> {
+    public static async deleteCategory({ serverId, categoryId }: IDeleteCategory): Promise<boolean> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateCategoryId(categoryId);
@@ -213,7 +241,7 @@ export class SubspaceServers {
 
     //#region channels
 
-    public static async createChannel({ serverId, channelName, categoryId, channelOrder, allowMessaging, allowAttachments }: { serverId: string, channelName: string, categoryId?: string, channelOrder?: number, allowMessaging?: number, allowAttachments?: number }): Promise<IChannel> {
+    public static async createChannel({ serverId, channelName, categoryId, channelOrder, allowMessaging, allowAttachments }: ICreateChannel): Promise<IChannel> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateChannelParams({
@@ -238,7 +266,7 @@ export class SubspaceServers {
         return channel
     }
 
-    public static async updateChannel({ serverId, channelId, channelName, categoryId, channelOrder, allowMessaging, allowAttachments }: { serverId: string, channelId: string, channelName?: string, categoryId?: string, channelOrder?: number, allowMessaging?: number, allowAttachments?: number }): Promise<IChannel> {
+    public static async updateChannel({ serverId, channelId, channelName, categoryId, channelOrder, allowMessaging, allowAttachments }: IUpdateChannel): Promise<IChannel> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateChannelId(channelId);
@@ -271,7 +299,7 @@ export class SubspaceServers {
         return channel
     }
 
-    public static async deleteChannel({ serverId, channelId }: { serverId: string, channelId: string }): Promise<boolean> {
+    public static async deleteChannel({ serverId, channelId }: IDeleteChannel): Promise<boolean> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateChannelId(channelId);
@@ -289,7 +317,7 @@ export class SubspaceServers {
 
     //#region roles
 
-    public static async createRole({ serverId, roleName, roleColor, rolePermissions, roleOrder, mentionable, hoist }: { serverId: string, roleName: string, roleColor?: string, rolePermissions?: number, roleOrder?: number, mentionable?: boolean, hoist?: boolean }): Promise<IRole> {
+    public static async createRole({ serverId, roleName, roleColor, rolePermissions, roleOrder, mentionable, hoist }: ICreateRole): Promise<IRole> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateRoleParams({
@@ -316,7 +344,7 @@ export class SubspaceServers {
         return role
     }
 
-    public static async updateRole({ serverId, roleId, roleName, roleColor, rolePermissions, roleOrder, mentionable, hoist }: { serverId: string, roleId: string, roleName?: string, roleColor?: string, rolePermissions?: number, roleOrder?: number, mentionable?: boolean, hoist?: boolean }): Promise<IRole> {
+    public static async updateRole({ serverId, roleId, roleName, roleColor, rolePermissions, roleOrder, mentionable, hoist }: IUpdateRole): Promise<IRole> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateRoleId(roleId);
@@ -351,7 +379,7 @@ export class SubspaceServers {
         return role
     }
 
-    public static async deleteRole({ serverId, roleId }: { serverId: string, roleId: string }): Promise<boolean> {
+    public static async deleteRole({ serverId, roleId }: IDeleteRole): Promise<boolean> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateRoleId(roleId);
@@ -365,7 +393,7 @@ export class SubspaceServers {
         return (res.status == 200)
     }
 
-    public static async assignRole({ serverId, userId, roleId }: { serverId: string, userId: string, roleId: string }): Promise<boolean> {
+    public static async assignRole({ serverId, userId, roleId }: IAssignRole): Promise<boolean> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateUserId(userId);
@@ -380,7 +408,7 @@ export class SubspaceServers {
         return (res.status == 200)
     }
 
-    public static async unassignRole({ serverId, userId, roleId }: { serverId: string, userId: string, roleId: string }): Promise<boolean> {
+    public static async unassignRole({ serverId, userId, roleId }: IUnassignRole): Promise<boolean> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateUserId(userId);
@@ -404,7 +432,7 @@ export class SubspaceServers {
 
     //#region messages
 
-    public static async sendMessage({ serverId, channelId, content, attachments }: { serverId: string, channelId: string, content: string, attachments?: string[] }): Promise<IMessage> {
+    public static async sendMessage({ serverId, channelId, content, attachments }: ISendMessage): Promise<IMessage> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateChannelId(channelId);
@@ -422,7 +450,7 @@ export class SubspaceServers {
         return message
     }
 
-    public static async updateMessage({ serverId, channelId, messageId, content }: { serverId: string, channelId: string, messageId: string, content: string }): Promise<IMessage> {
+    public static async updateMessage({ serverId, channelId, messageId, content }: IUpdateMessage): Promise<IMessage> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateChannelId(channelId);
@@ -440,7 +468,7 @@ export class SubspaceServers {
         return message
     }
 
-    public static async deleteMessage({ serverId, channelId, messageId }: { serverId: string, channelId: string, messageId: string }): Promise<boolean> {
+    public static async deleteMessage({ serverId, channelId, messageId }: IDeleteMessage): Promise<boolean> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateChannelId(channelId);
@@ -450,6 +478,61 @@ export class SubspaceServers {
 
         tags.push({ name: "channel-id", value: channelId })
         tags.push({ name: "message-id", value: messageId })
+
+        const res = await Subspace.ao().write({ processId: serverId, tags: tags })
+        return (res.status == 200)
+    }
+
+    public static async updateMember({ serverId, userId, nickname }: IUpdateMember): Promise<IMember> {
+        // Validate inputs
+        SubspaceValidation.validateServerId(serverId);
+        SubspaceValidation.validateUserId(userId);
+        SubspaceValidation.validateStringWithLength(nickname, "nickname", 1, 32);
+
+        const tags: Tag[] = [{ name: "Action", value: "update-member" }]
+
+        tags.push({ name: "user-id", value: userId })
+        if (nickname) tags.push({ name: "nickname", value: nickname })
+
+        const res = await Subspace.ao().write({ processId: serverId, tags: tags })
+        const member = Subspace.ao().matchAction<IMember>("update-member-response", res)
+        return member
+    }
+
+    public static async kickMember({ serverId, userId }: IKickMember): Promise<boolean> {
+        // Validate inputs
+        SubspaceValidation.validateServerId(serverId);
+        SubspaceValidation.validateUserId(userId);
+
+        const tags: Tag[] = [{ name: "Action", value: "kick-member" }]
+
+        tags.push({ name: "user-id", value: userId })
+
+        const res = await Subspace.ao().write({ processId: serverId, tags: tags })
+        return (res.status == 200)
+    }
+
+    public static async banMember({ serverId, userId }: IBanMember): Promise<boolean> {
+        // Validate inputs
+        SubspaceValidation.validateServerId(serverId);
+        SubspaceValidation.validateUserId(userId);
+
+        const tags: Tag[] = [{ name: "Action", value: "ban-member" }]
+
+        tags.push({ name: "user-id", value: userId })
+
+        const res = await Subspace.ao().write({ processId: serverId, tags: tags })
+        return (res.status == 200)
+    }
+
+    public static async unbanMember({ serverId, userId }: IUnbanMember): Promise<boolean> {
+        // Validate inputs
+        SubspaceValidation.validateServerId(serverId);
+        SubspaceValidation.validateUserId(userId);
+
+        const tags: Tag[] = [{ name: "Action", value: "unban-member" }]
+
+        tags.push({ name: "user-id", value: userId })
 
         const res = await Subspace.ao().write({ processId: serverId, tags: tags })
         return (res.status == 200)

@@ -1,6 +1,6 @@
 import { connect } from "@permaweb/aoconnect"
 import { log, withDuration } from "./logger";
-import { Constants } from "./constants";
+import { Constants, Defaults } from "./constants";
 
 interface MainnetOptions {
     GATEWAY_URL: string;
@@ -49,8 +49,8 @@ export class AO {
     public address?: string;
 
     constructor(params: MainnetOptions) {
-        this.hbUrl = params.HB_URL || "https://scheduler.forward.computer";
-        this.gatewayUrl = params.GATEWAY_URL || "https://arweave.net";
+        this.hbUrl = params.HB_URL || Defaults.HB_URL;
+        this.gatewayUrl = params.GATEWAY_URL || Defaults.GATEWAY_URL;
         this.signer = params.signer;
         this.address = params.address;
     }

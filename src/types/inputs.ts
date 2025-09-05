@@ -137,3 +137,22 @@ export interface IDeleteDM {
     userId: string
     messageId: string
 }
+
+export interface IUpdateMember {
+    serverId: string
+    userId: string
+    nickname?: string
+}
+
+export interface IKickMember {
+    serverId: string
+    userId: string
+}
+
+export interface IBanMember extends IKickMember { }
+export interface IUnbanMember extends IBanMember { }
+
+export interface IGetMember {
+    serverId: string
+    userId: string
+}

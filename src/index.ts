@@ -43,6 +43,7 @@ export class Subspace {
         });
         this.address = options.address
         this.initialized = true;
+        Utils.log({ type: "success", label: "Subspace initialized", data: options })
         try {
             await this.getSources()
         } catch (error) {
@@ -96,3 +97,5 @@ export { SubspaceValidation, ValidationError } from "./utils/validation"
 import { log, withDuration } from "./utils/logger"
 const Utils = { log, withDuration }
 export { Utils }
+
+export { EPermissions } from "./types/subspace"

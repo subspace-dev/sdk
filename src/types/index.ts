@@ -22,6 +22,11 @@ export namespace Inputs {
     export type ISendDM = InputTypes.ISendDM
     export type IEditDM = InputTypes.IEditDM
     export type IDeleteDM = InputTypes.IDeleteDM
+    export type IUpdateMember = InputTypes.IUpdateMember
+    export type IKickMember = InputTypes.IKickMember
+    export type IBanMember = InputTypes.IBanMember
+    export type IUnbanMember = InputTypes.IUnbanMember
+    export type IGetMember = InputTypes.IGetMember
 }
 
 // Export all output/entity types
@@ -37,6 +42,9 @@ export type {
     IAttachment,
     INotification,
     Tag,
-    ServerEvent,
-    EPermissions
+    ServerEvent
 } from "./subspace"
+
+// Export EPermissions as a value (enum)
+import { EPermissions } from "./subspace"
+export { EPermissions }

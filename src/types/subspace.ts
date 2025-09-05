@@ -40,7 +40,7 @@ export interface IServer {
 export interface IMember {
     id: string;
     nickname: string;
-    roles: Record<string, IRole | string>;
+    roles: Record<string, string>; // {role-id: role-id}
     joined_at: number;
     is_bot: boolean;
 }
@@ -89,20 +89,20 @@ export interface IAttachment {
 
 export type ServerEvent = 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 | 130 | 140 | 150 | 160 | 170;
 
-export enum EPermissions {
-    SEND_MESSAGES = 1 << 0,    // 1
-    MANAGE_NICKNAMES = 1 << 1, // 2
-    MANAGE_MESSAGES = 1 << 2,  // 4
-    KICK_MEMBERS = 1 << 3,     // 8
-    BAN_MEMBERS = 1 << 4,      // 16
-    MANAGE_CHANNELS = 1 << 5,  // 32
-    MANAGE_SERVER = 1 << 6,    // 64
-    MANAGE_ROLES = 1 << 7,     // 128
-    MANAGE_MEMBERS = 1 << 8,   // 256
-    MENTION_EVERYONE = 1 << 9, // 512
-    ADMINISTRATOR = 1 << 10,   // 1024
-    ATTACHMENTS = 1 << 11,     // 2048
-    MANAGE_BOTS = 1 << 12,     // 4096
+export const EPermissions = {
+    SEND_MESSAGES: 1 << 0,    // 1
+    MANAGE_NICKNAMES: 1 << 1, // 2
+    MANAGE_MESSAGES: 1 << 2,  // 4
+    KICK_MEMBERS: 1 << 3,     // 8
+    BAN_MEMBERS: 1 << 4,      // 16
+    MANAGE_CHANNELS: 1 << 5,  // 32
+    MANAGE_SERVER: 1 << 6,    // 64
+    MANAGE_ROLES: 1 << 7,     // 128
+    MANAGE_MEMBERS: 1 << 8,   // 256
+    MENTION_EVERYONE: 1 << 9, // 512
+    ADMINISTRATOR: 1 << 10,   // 1024
+    ATTACHMENTS: 1 << 11,     // 2048
+    MANAGE_BOTS: 1 << 12,     // 4096
 }
 
 export interface INotification {
@@ -116,5 +116,3 @@ export interface INotification {
     timestamp: string;
     preview_content: string;
 }
-
-export { WriteError, ErrorResponse } from "../utils/ao"
