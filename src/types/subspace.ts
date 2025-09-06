@@ -75,7 +75,7 @@ export interface IMessage {
     content: string;
     author_id: string;
     channel_id: string;
-    timestamp: string;
+    timestamp: number;
     edited: boolean;
     attachments: Record<string, IAttachment>;
 }

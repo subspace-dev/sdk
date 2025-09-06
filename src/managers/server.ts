@@ -432,6 +432,30 @@ export class SubspaceServers {
 
     //#region messages
 
+    public static async getMessages(serverId: string, channelId: string): Promise<Record<string, IMessage>> { // messageId -> message
+
+        SubspaceValidation.validateServerId(serverId);
+        SubspaceValidation.validateChannelId(channelId);
+
+        const res = await Subspace.ao().read<Record<string, IMessage>>({ path: `/${serverId}/now/messages/${channelId}/` })
+        return res
+    }
+
+    public static async getAllMessages(serverId: string): Promise<Record<string, Record<string, IMessage>>> { // channelId -> messageId -> message
+        SubspaceValidation.validateServerId(serverId);
+        const res = await Subspace.ao().read<Record<string, Record<string, IMessage>>>({ path: `/${serverId}/now/messages/` })
+        return res
+    }
+
+    public static async getMessage(serverId: string, channelId: string, messageId: string): Promise<IMessage> {
+        SubspaceValidation.validateServerId(serverId);
+        SubspaceValidation.validateChannelId(channelId);
+        SubspaceValidation.validateMessageId(messageId);
+
+        const res = await Subspace.ao().read<IMessage>({ path: `/${serverId}/now/messages/${channelId}/${messageId}` })
+        return res
+    }
+
     public static async sendMessage({ serverId, channelId, content, attachments }: ISendMessage): Promise<IMessage> {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);

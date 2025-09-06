@@ -117,7 +117,7 @@ members = members or {}
 --- @type table<string, Member>
 bots = bots or {}
 
---- @type table<string, Message>
+--- @type table<string, table<string, Message>> -- channelId -> messageId -> message
 messages = messages or {}
 
 server = server or {
@@ -488,6 +488,14 @@ local utils = {
             return false
         end
     },
+    messages = {
+        --- @param messageId string
+        --- @param message Message
+        set = function(messageId, message)
+            messages[message.channel_id] = messages[message.channel_id] or {}
+            messages[message.channel_id][messageId] = message
+        end,
+    },
     permissions = permission_utils,
 }
 
@@ -608,9 +616,9 @@ local function add_member(msg)
 
     -- Check if user is already a member
     local existingMember = utils.members.get(userId)
-    assert(not existingMember, "400|user is already a member")
+    -- assert(not existingMember, "400|user is already a member")
 
-    local memberData = {
+    local memberData = existingMember or {
         id = userId,
         nickname = "",
         joined_at = os.time(),
@@ -1205,6 +1213,9 @@ local function delete_channel(msg)
     -- Remove from channel to category mapping
     helpers.channel_to_category[channelId] = nil
 
+    -- Delete all messages in the channel
+    messages[channelId] = nil
+
     -- Delete the channel
     server.channels[channelId] = nil
 
@@ -1600,6 +1611,8 @@ local function send_message(msg)
     -- Store message (in a real implementation, you'd want a proper message storage system)
     -- For now, we'll just acknowledge the message was sent
 
+    utils.messages.set(messageId, message)
+
     -- Push event to subscribers
     push_event({
         event_type = helpers.events.message_sent,
@@ -1661,6 +1674,8 @@ local function update_message(msg)
         edited_timestamp = timestamp,
     }
 
+    utils.messages.set(messageId, updatedMessage)
+
     -- Push event to subscribers
     push_event({
         event_type = helpers.events.message_edited,
@@ -1706,6 +1721,8 @@ local function delete_message(msg)
     assert(canDelete, "403|insufficient permissions to delete this message")
 
     local timestamp = os.time()
+
+    utils.messages.set(messageId, nil)
 
     -- Push event to subscribers
     push_event({

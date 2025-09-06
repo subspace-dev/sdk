@@ -14,7 +14,6 @@ export class SubspaceProfiles {
                 profile.servers[serverId].approved = JSON.parse(profile.servers[serverId].approved.toString())
             })
         }
-        console.log(profile)
         return profile
     }
 
