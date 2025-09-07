@@ -15,6 +15,11 @@
       "import": "./dist/esm/types/index.js",
       "require": "./dist/cjs/types/index.js",
       "types": "./dist/types/types/index.d.ts"
+    },
+    "./permissions": {
+      "import": "./dist/esm/permissions/index.js",
+      "require": "./dist/cjs/permissions/index.js",
+      "types": "./dist/types/permissions/index.d.ts"
     }
   },
   "files": [

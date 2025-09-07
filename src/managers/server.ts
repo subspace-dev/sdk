@@ -179,6 +179,17 @@ export class SubspaceServers {
         return false
     }
 
+    public static async leaveServer(serverId: string): Promise<boolean> {
+        // Validate server ID
+        SubspaceValidation.validateServerId(serverId);
+
+        const tags: Tag[] = [{ name: "Action", value: "leave-server" }]
+        tags.push({ name: "server-id", value: serverId })
+
+        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        return (res.status == 200)
+    }
+
     //#endregion
 
     //#region categories

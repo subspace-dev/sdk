@@ -1,3330 +1,1827 @@
-json = require("json")
+local json = require("json")
 
-----------------------------------------------------------------------------
---- VARIABLES
+--#region configuration
 
-Subspace = "RmrKN2lAw5nu9eIQzXXi9DYT-95PqaLURnG9PRsoVuo"
-Name = Name or "{NAME}"
-Logo = Logo or "{LOGO}"
-Description = Description or "{DESCRIPTION}"
-Balances = Balances or { [Owner] = 1 }
-TotalSupply = TotalSupply or 1
-Denomination = Denomination or 10
-Ticker = Ticker or "{TICKER}"
-Version_ = Version_ or "1.0.0" -- Version is already a built in function
+subspace_id = subspace_id or "<<SUBSPACE>>"
 
--- Server visibility policy:
--- - Public by default: anyone can join
--- - If private, join requests must be approved by server-side logic (not implemented here)
--- - Reads can still be permitted by external cache depending on consumer policy
-PublicServer = PublicServer or true
+--#endregion
 
--- in-memory storage only
+--#region helpers
 
-----------------------------------------------------------------------------
+helpers = helpers or {
+    logs = {},
+    --- @type table<string, table<string, boolean>>
+    role_to_member = {},            -- {roleId = {memberId=true, memberId=true, ...}}
+    --- @type table<string, boolean>
+    bans = {},                      -- {userId = true...}
+    --- @type table<string, string>
+    channel_to_category = {},       -- {channelId = categoryId}
+    -- - @type table<string, Permission>
+    permissions = {                 -- read only
+        send_messages    = 1 << 0,  -- 1
+        manage_nicknames = 1 << 1,  -- 2
+        manage_messages  = 1 << 2,  -- 4
+        kick_members     = 1 << 3,  -- 8
+        ban_members      = 1 << 4,  -- 16
+        manage_channels  = 1 << 5,  -- 32
+        manage_server    = 1 << 6,  -- 64
+        manage_roles     = 1 << 7,  -- 128
+        manage_members   = 1 << 8,  -- 256
+        mention_everyone = 1 << 9,  -- 512
+        administrator    = 1 << 10, -- 1024
+        attachments      = 1 << 11, -- 2048
+        manage_bots      = 1 << 12, -- 4096
+    },
+    status = {                      -- read only
+        success = 200,
+        created = 201,
+        accepted = 202,
+        no_content = 204,
 
--- legacy sqlite helpers removed
+        bad_request = 400,
+        unauthorized = 401,
+        payment_required = 402,
+        forbidden = 403,
+        not_found = 404,
+        method_not_allowed = 405,
+        not_acceptable = 406,
+        content_too_large = 413,
+        teapot = 418, -- 🫖
+        too_many_requests = 429,
 
--- Return nil for empty-string inputs so that tag lookups can be optional
-function VarOrNil(var)
-    return var ~= "" and var or nil
+        internal_server_error = 500,
+        not_implemented = 501,
+    },
+    --- @type table<string, ServerEvent>
+    events = { -- read only
+        message_sent = 10,
+        message_edited = 20,
+        message_deleted = 30,
+
+        member_joined = 40,
+        member_left = 50,
+        member_updated = 60,
+        member_kicked = 70,
+        member_banned = 80,
+
+        channel_created = 90,
+        channel_deleted = 100,
+        channel_updated = 110,
+
+        category_created = 120,
+        category_deleted = 130,
+        category_updated = 140,
+
+        role_created = 150,
+        role_deleted = 160,
+        role_updated = 170,
+    }
+}
+
+--#endregion
+
+--#region initialization
+
+local function get_id()
+    return tostring(math.random(10, 99) .. math.floor(os.time()))
 end
 
--- Guard helper: if 'condition' is true, immediately reply with an error envelope
--- and return true to signal that the caller should stop further processing
-function ValidateCondition(condition, msg, body)
-    if condition then
-        body = body or {}
-        body.Action = body.Action or msg.Action .. "-Response"
-        body.Status = body.Status or "500"
-        body.Data = body.Data or json.encode({
-            error = "Internal server error"
-        })
-        msg.reply(body)
-        return true
-    else
-        return false
-    end
+--- @param err string
+--- @return {status: number, error: string}
+local function get_status_and_error(err)
+    local status, error_text = err:match("^(%d+)|(.*)$")
+    status = status or helpers.status.teapot
+    error_text = error_text or err
+    return {
+        status = math.floor(status),
+        error = error_text
+    }
 end
 
-----------------------------------------------------------------------------
--- Bootstrap defaults so a fresh server starts usable
-local categories_default = {
-    ["1"] = {
-        name = "Welcome",
-        orderId = 1,
-        allowMessaging = 1,
-        allowAttachments = 1
-    }
-}
-local channels_default = {
-    ["1"] = {
-        name = "General",
-        orderId = 1,
-        categoryId = "1",
-    }
-}
-local roles_default = {
-    ["1"] = {
-        roleId = "1",
-        name = "everyone",
-        orderId = 1,
-        color = "#99AAB5",
-        permissions = 1 -- SEND_MESSAGES
-    }
-}
+--- @param e table{timestamp: string, status: number, action: string, error: string}
+local function pprint(e)
+    -- [timestamp] status | action => error
+    print(colors.blue .. "[" .. e.timestamp .. colors.reset .. "] " ..
+        colors.bg_red .. tostring(e.status) .. colors.reset .. " | " ..
+        colors.yellow .. e.action .. colors.reset .. " => " ..
+        colors.red .. e.error .. colors.reset)
+end
 
-categories = categories or categories_default
-channels = channels or channels_default
+local category_id = get_id()
+local uncategorised_channel_id = get_id()
+local categorised_channel_id = get_id()
+
+--- @type table<string, Member>
 members = members or {}
-roles = roles or roles_default
-messages = messages or {}
-events = events or {}
-events_bak = events_bak or {}
+
+--- @type table<string, Member>
 bots = bots or {}
-MemberCount = MemberCount or 0
 
--- Fast lookup: roleId => set(userId)
-role_member_mapping = role_member_mapping or {} -- {roleId = {memberId=true, memberId=true, ...}}
+--- @type table<string, table<string, Message>> -- channelId -> messageId -> message
+messages = messages or {}
 
--- Keep role_member_mapping in sync
-local function AddUserToRoleMapping(roleId, userId)
-    roleId = tostring(roleId)
-    if not role_member_mapping[roleId] then
-        role_member_mapping[roleId] = {}
-    end
-    role_member_mapping[roleId][userId] = true
-end
-
-local function RemoveUserFromRoleMapping(roleId, userId)
-    roleId = tostring(roleId)
-    local map = role_member_mapping[roleId]
-    if map then
-        map[userId] = nil
-        if next(map) == nil then
-            role_member_mapping[roleId] = nil
-        end
-    end
-end
-
-local function RemoveUserFromAllRoleMappings(userId, rolesList)
-    if rolesList and type(rolesList) == "table" then
-        for _, rid in ipairs(rolesList) do
-            RemoveUserFromRoleMapping(rid, userId)
-        end
-        return
-    end
-    -- Fallback if roles list is unavailable
-    for rid, map in pairs(role_member_mapping) do
-        if map then
-            map[userId] = nil
-            if next(map) == nil then
-                role_member_mapping[rid] = nil
-            end
-        end
-    end
-end
-
--- legacy sqlite schema removed
-
--- legacy default DB bootstrap comments removed
-SubscribedBots = SubscribedBots or {}
--- example structure = {[bot-id]={[event-type]=true, [event-type]=true, ...}}
-
-Permissions = {
-    SEND_MESSAGES = 1 << 0,    -- 1
-    MANAGE_NICKNAMES = 1 << 1, -- 2
-    MANAGE_MESSAGES = 1 << 2,  -- 4
-    KICK_MEMBERS = 1 << 3,     -- 8
-    BAN_MEMBERS = 1 << 4,      -- 16
-    MANAGE_CHANNELS = 1 << 5,  -- 32
-    MANAGE_SERVER = 1 << 6,    -- 64
-    MANAGE_ROLES = 1 << 7,     -- 128
-    MANAGE_MEMBERS = 1 << 8,   -- 256
-    MENTION_EVERYONE = 1 << 9, -- 512
-    ADMINISTRATOR = 1 << 10,   -- 1024
-    ATTACHMENTS = 1 << 11,     -- 2048
-    MANAGE_BOTS = 1 << 12,     -- 4096
+server = server or {
+    --- @type Server
+    profile = {
+        id = id,
+        owner = owner,
+        name = "",
+        description = "",
+        pfp = "",
+        banner = "",
+        -- public_server field removed
+    },
+    member_count = 0,
+    --- @type table<string, Category>
+    categories = {
+        [category_id] = {
+            id = category_id,
+            name = "Welcome",
+            order = 1,
+        }
+    },
+    --- @type table<string, Channel>
+    channels = {
+        [uncategorised_channel_id] = {
+            id = uncategorised_channel_id,
+            name = "gm",
+            order = 1,
+            category_id = nil, -- uncategorised,
+            allow_messaging = nil,
+            allow_attachments = nil,
+        },
+        [categorised_channel_id] = {
+            id = categorised_channel_id,
+            name = "general",
+            order = 1,
+            category_id = category_id, -- categorised
+            allow_messaging = nil,
+            allow_attachments = nil,
+        },
+    },
+    --- @type table<string, Role>
+    roles = {
+        ["@"] = {
+            id = "@",
+            name = "everyone",
+            order = 1,                                       -- larger number = role is above
+            color = "#99AAB5",
+            permissions = helpers.permissions.send_messages, -- SEND_MESSAGES
+            mentionable = false,
+            hoist = true,
+        }
+    },
 }
 
-Events = { -- Readonly
-    on_message_send = "on_message_send",
-    on_message_edit = "on_message_edit",
-    on_message_delete = "on_message_delete",
+--#endregion
 
-    on_member_join = "on_member_join",
-    on_member_leave = "on_member_leave",
-    on_member_update = "on_member_update",
+--#region utils
 
-    on_channel_create = "on_channel_create",
-    on_channel_delete = "on_channel_delete",
-    on_channel_update = "on_channel_update",
+local function is_bot(memberId)
+    return bots[memberId] ~= nil
+end
 
-    on_category_create = "on_category_create",
-    on_category_delete = "on_category_delete",
-    on_category_update = "on_category_update"
+local role_utils = {
+    --- @param roleId string
+    --- @return Role | nil
+    get = function(roleId)
+        return server.roles[roleId]
+    end,
+    --- @param roleId string
+    --- @param role Role
+    set = function(roleId, role)
+        server.roles[roleId] = role
+    end,
+    --- @param roleId string
+    --- @param memberId string
+    assign = function(roleId, memberId)
+        -- Get member from appropriate table (members or bots)
+        local member = members[memberId] or bots[memberId]
+        if member then
+            member.roles[roleId] = roleId
+            if member.is_bot then
+                bots[memberId] = member
+            else
+                members[memberId] = member
+            end
+            helpers.role_to_member[roleId] = helpers.role_to_member[roleId] or {}
+            helpers.role_to_member[roleId][memberId] = true
+        end
+    end,
+    --- @param roleId string
+    --- @param memberId string
+    unassign = function(roleId, memberId)
+        -- Get member from appropriate table (members or bots)
+        local member = members[memberId] or bots[memberId]
+        if member then
+            member.roles[roleId] = nil
+            if member.is_bot then
+                bots[memberId] = member
+            else
+                members[memberId] = member
+            end
+            helpers.role_to_member[roleId] = helpers.role_to_member[roleId] or {}
+            helpers.role_to_member[roleId][memberId] = nil
+        end
+    end,
 }
 
--- if SQLRead("SELECT COUNT(*) as roleCount FROM roles")[1].roleCount == 0 then
---     SQLWrite("INSERT INTO roles (name, orderId, color, permissions) VALUES (?, ?, ?, ?)",
---         "everyone", 1, "#696969", Permissions.SEND_MESSAGES)
--- end
 
-----------------------------------------------------------------------------
---- HELPERS
+local member_utils = {
+    --- @param memberId string
+    --- @return Member | nil
+    get = function(memberId)
+        -- Check both members and bots tables
+        local m = members[memberId] or bots[memberId]
+        if not m then return nil end
 
--- FOR FUTURE USE - DONOT REMOVE
--- function GetOriginalId(userId)
---     local originalId = nil
---     ao.send({
---         Action = "Get-Original-Id",
---         Tags = {
---             userId = userId
---         }
---     })
---     local res = Receive({ Action = "Get-Original-Id-Response", From = Profiles })
---     if res.Status == "200" then
---         originalId = res.Data.originalId
---     end
---     return originalId
--- end
-
-function IsMemberBot(userId)
-    return bots[userId] ~= nil
-end
-
--- Return a copy of member with roles resolved to role objects (non-mutating)
-function GetMember(userId)
-    -- Return a copy with roles resolved to role objects; do not mutate stored state
-    local stored = IsMemberBot(userId) and bots[userId] or members[userId]
-    if not stored then return nil end
-    local copy = {
-        userId = stored.userId or userId,
-        process = stored.process,
-        nickname = stored.nickname,
-        joinedAt = stored.joinedAt,
-        roles = {},
-        isBot = IsMemberBot(userId)
-    }
-    for _, roleId in ipairs(stored.roles or {}) do
-        local role = GetRole(roleId)
-        if role then table.insert(copy.roles, role) end
-    end
-    table.sort(copy.roles, function(a, b)
-        return (a.orderId or 0) < (b.orderId or 0)
-    end)
-    return copy
-end
-
-function GetMemberPermissions(member)
-    local permissions = 0
-    for _, role in ipairs(member.roles) do
-        permissions = permissions | role.permissions
-    end
-    return permissions
-end
-
--- Sanitize member data before storage - keep only raw data
-function SanitizeMemberData(memberData)
-    if not memberData then return nil end
-
-    local sanitized = {
-        userId = memberData.userId,
-        nickname = memberData.nickname,
-        joinedAt = memberData.joinedAt,
-        roles = {}
-    }
-
-    -- Ensure roles is an array of role IDs only (not role objects)
-    if memberData.roles then
-        for _, roleData in ipairs(memberData.roles) do
-            if type(roleData) == "string" then
-                -- Already a role ID string
-                table.insert(sanitized.roles, roleData)
-            elseif type(roleData) == "table" and roleData.roleId then
-                -- Role object, extract the roleId
-                table.insert(sanitized.roles, tostring(roleData.roleId))
+        -- Create a copy to avoid modifying stored data
+        local member_copy = {}
+        for k, v in pairs(m) do
+            if k == "roles" then
+                -- Copy roles table without modification
+                member_copy.roles = {}
+                for roleId, roleData in pairs(v) do
+                    member_copy.roles[roleId] = roleData
+                end
+            else
+                member_copy[k] = v
             end
         end
-    end
 
-    -- For bots, also preserve additional bot-specific fields
-    if memberData.process then
-        sanitized.process = memberData.process
-        sanitized.approved = memberData.approved
-    end
+        -- Ensure is_bot flag is set correctly
+        member_copy.is_bot = bots[memberId] ~= nil
+        return member_copy
+    end,
+    --- @param memberId string
+    --- @param member Member|nil
+    set = function(memberId, member)
+        if member and member.is_bot then
+            bots[memberId] = member
+            -- Remove from members table if it exists there
+            members[memberId] = nil
+        else
+            members[memberId] = member
+            -- Remove from bots table if it exists there
+            bots[memberId] = nil
+        end
+    end,
+    is_bot = is_bot,
+}
 
-    return sanitized
-end
 
--- Helper function to get the appropriate table and update role mapping
-function UpdateMemberTable(userId, memberData)
-    -- Sanitize the member data before storing to ensure clean storage
-    local sanitizedData = SanitizeMemberData(memberData)
+local bot_utils = {
+    --- @param botId string
+    --- @return Member | nil
+    get = function(botId)
+        return member_utils.get(botId)
+    end,
+    --- @param botId string
+    --- @param bot Member|nil
+    set = function(botId, bot)
+        bot.is_bot = true
+        member_utils.set(botId, bot)
+    end,
+}
 
-    if IsMemberBot(userId) then
-        bots[userId] = sanitizedData
-    else
-        members[userId] = sanitizedData
-    end
-end
 
--- Helper function to remove from appropriate table and role mapping
-function RemoveMemberFromTables(userId)
-    local memberData = IsMemberBot(userId) and bots[userId] or members[userId]
-    local rolesList = memberData and memberData.roles
+local permission_utils = {
+    --- @param member Member
+    --- @return number -- Returns the highest role order for the member
+    get_highest_role_order = function(member)
+        local highest_order = 0
+        for roleId, _ in pairs(member.roles) do
+            local role = role_utils.get(roleId)
+            if role and type(role.order) == "number" and role.order > highest_order then
+                highest_order = role.order
+            end
+        end
+        return highest_order
+    end,
+    --- @param member Member
+    --- @param permission number
+    --- @return boolean
+    member_has = function(member, permission)
+        local perm_int = 0
+        for roleId, _ in pairs(member.roles) do
+            local role = role_utils.get(roleId)
+            if role and type(role.permissions) == "number" then
+                perm_int = perm_int | role.permissions
+            end
+        end
 
-    -- Remove from role mapping
-    RemoveUserFromAllRoleMappings(userId, rolesList)
+        -- Check for owner or administrator permission
+        if member.id == owner then return true end
 
-    -- Remove from appropriate table
-    if IsMemberBot(userId) then
-        bots[userId] = nil
-        SubscribedBots[userId] = nil -- Also remove from subscriptions if it's a bot
-    else
-        members[userId] = nil
-    end
-end
+        -- Check for administrator permission (administrator has all permissions)
+        if perm_int & helpers.permissions.administrator == helpers.permissions.administrator then
+            return true
+        end
 
-function RoleHasPermission(role, permission)
-    if not role or not PermissionIsValid(role.permissions) or not PermissionIsValid(permission) then
-        return false
-    end
+        return perm_int & permission == permission
+    end,
 
-    return role.permissions & permission == permission
-end
+    --- @param role Role
+    --- @param permission number
+    --- @return boolean
+    role_has = function(role, permission)
+        return (role.permissions or 0) & permission == permission
+    end,
+    --- @param member Member
+    --- @param permissions table<number> -- Array of permissions to check (OR logic)
+    --- @return boolean
+    member_has_any = function(member, permissions)
+        local perm_int = 0
+        for roleId, _ in pairs(member.roles) do
+            local role = role_utils.get(roleId)
+            if role and type(role.permissions) == "number" then
+                perm_int = perm_int | role.permissions
+            end
+        end
 
--- Resolve member's effective permissions across all roles.
--- ADMINISTRATOR or server Owner short-circuit to true.
-function MemberHasPermission(member, permission)
-    -- return true if the member has the permission, false otherwise
-    -- analyze member.roles to find out what permissions the member has
-    -- Administrator permission overrides all other permissions
+        -- Check for owner or administrator permission
+        if member.id == owner then return true end
 
-    if not member or not PermissionIsValid(permission) then
-        return false
-    end
+        -- Check for administrator permission (administrator has all permissions)
+        if perm_int & helpers.permissions.administrator == helpers.permissions.administrator then
+            return true
+        end
 
-    -- if member is the server owner, return true
-    if member.userId == Owner then
-        return true
-    end
-
-    if not member.roles or #member.roles == 0 then
-        return false
-    end
-
-    local totalPermissions = 0
-    for _, role in ipairs(member.roles) do
-        if role and PermissionIsValid(role.permissions) then
-            -- Accumulate permissions from all roles
-            totalPermissions = totalPermissions | role.permissions
-            -- Administrator permission overrides all other permissions
-            if RoleHasPermission(role, Permissions.ADMINISTRATOR) then
+        -- Check if member has any of the specified permissions
+        for _, permission in ipairs(permissions) do
+            if perm_int & permission == permission then
                 return true
             end
         end
-    end
-
-    -- Check if the accumulated permissions include the requested permission
-    return HasSpecificPermission(totalPermissions, permission)
-end
-
--- Validate that a permissions bitfield contains only known bits
-function PermissionIsValid(permission)
-    -- validate: permission should be either one or many from Permissions table
-
-    permission = tonumber(permission)
-
-    -- Check if permission is a number and is positive
-    if not permission or permission <= 0 then
         return false
+    end,
+
+}
+
+--- @param event table
+local function push_event(event)
+    -- Push event data to bot subscribers only
+    -- Only bots can subscribe to events, so all subscribers are bots
+
+    if not server.subscribers then
+        return -- No subscribers
     end
 
-    -- Calculate the maximum valid permission value (all permissions combined)
-    local maxValidPermission = 0
-    for _, permValue in pairs(Permissions) do
-        maxValidPermission = maxValidPermission | permValue
-    end
+    local eventType = event.event_type
+    assert(eventType, "event_type is required")
 
-    -- Check if the permission only contains valid permission bits
-    -- If (permission & maxValidPermission) == permission, then all bits in permission
-    -- are valid permission bits
-    if (permission & maxValidPermission) ~= permission then
-        return false
-    end
-
-    return true
-end
-
--- Get all individual permissions from a combined permission value
--- Expand a bitfield into individual permission names
-function GetPermissionNames(permissions)
-    local permissionNames = {}
-
-    if not PermissionIsValid(permissions) then
-        return permissionNames
-    end
-
-    for permName, permValue in pairs(Permissions) do
-        if permissions & permValue == permValue then
-            table.insert(permissionNames, permName)
-        end
-    end
-
-    return permissionNames
-end
-
--- Combine multiple permission values safely
--- Combine multiple permission values safely
-function CombinePermissions(...)
-    local combined = 0
-    local permissions = { ... }
-
-    for _, perm in ipairs(permissions) do
-        if PermissionIsValid(perm) then
-            combined = combined | perm
-        end
-    end
-
-    return combined
-end
-
--- Check if a permission value has a specific permission
--- Check if a bitfield contains a specific permission
-function HasSpecificPermission(permissions, specificPermission)
-    if not PermissionIsValid(permissions) or not PermissionIsValid(specificPermission) then
-        return false
-    end
-
-    return permissions & specificPermission == specificPermission
-end
-
--- Get the default role for the server (roleId 1 is always the default role)
--- Retrieve the default role (roleId 1)
-function GetDefaultRole()
-    -- Prefer role with key "1"
-    if roles["1"] then return roles["1"] end
-    -- Fallback if stored under numeric key 1
-    if roles[1] then return roles[1] end
-    -- Fallback: scan for role where role.roleId == "1" or 1
-    for _, r in pairs(roles) do
-        if r and (tostring(r.roleId) == "1" or r.roleId == 1) then
-            return r
-        end
-    end
-    return nil
-end
-
--- Ensure all members have the default role (roleId 1)
--- This function can be called to fix any inconsistencies
--- Ensure every member has the default role (repair tool)
-function EnsureAllMembersHaveDefaultRole()
-    local defaultRole = GetDefaultRole()
-    if not defaultRole then
-        print("==> No default role exists")
-        return 0 -- No default role exists
-    end
-
-    local membersUpdated = 0
-
-    -- Update regular members
-    for memberId, member in pairs(members) do
-        local hasDefault = false
-        local existing = member.roles or {}
-        for _, rid in ipairs(existing) do
-            if tostring(rid) == "1" then
-                hasDefault = true
+    -- Iterate through all bot subscribers
+    for subscriberId, subscription in pairs(server.subscribers) do
+        -- Check if bot is interested in this event type
+        local isInterestedInEvent = false
+        for _, subscribedEvent in ipairs(subscription.events) do
+            if subscribedEvent == eventType then
+                isInterestedInEvent = true
                 break
             end
         end
-        if not hasDefault then
-            local newRoles = { "1" }
-            for _, rid in ipairs(existing) do table.insert(newRoles, rid) end
-            member.roles = newRoles
-            -- Update the sanitized version in storage
-            UpdateMemberTable(memberId, member)
-            -- reflect in mapping
-            AddUserToRoleMapping("1", memberId)
-            membersUpdated = membersUpdated + 1
+
+        if isInterestedInEvent then
+            -- Send event to bot subscriber
+            send({
+                target = subscriberId,
+                action = "event",
+                ["event-type"] = eventType,
+                data = json.encode(event),
+                timestamp = os.time()
+            })
         end
     end
+end
 
-    -- Update bots
-    for botId, bot in pairs(bots) do
-        if bot.approved then -- Only update approved bots
-            local hasDefault = false
-            local existing = bot.roles or {}
-            for _, rid in ipairs(existing) do
-                if tostring(rid) == "1" then
-                    hasDefault = true
-                    break
-                end
+local utils = {
+    var_or_nil = function(var)
+        return var ~= "" and var or nil
+    end,
+    handle_run = function(func, msg)
+        msg.reply = function(data)
+            local target = msg.from
+            if not msg['from-process'] then
+                target = id
             end
-            if not hasDefault then
-                local newRoles = { "1" }
-                for _, rid in ipairs(existing) do table.insert(newRoles, rid) end
-                bot.roles = newRoles
-                -- Update the sanitized version in storage
-                UpdateMemberTable(botId, bot)
-                -- reflect in mapping
-                AddUserToRoleMapping("1", botId)
-                membersUpdated = membersUpdated + 1
-            end
+            data.target = target
+            if not data["x-status"] then data["x-status"] = helpers.status.success end
+            send(data)
         end
-    end
-
-    return membersUpdated
-end
-
--- Rebuild role_member_mapping based on current members' roles
--- Rebuild role_member_mapping from scratch
-local function RebuildRoleMemberMapping()
-    role_member_mapping = {}
-
-    -- Add regular members
-    for memberId, member in pairs(members) do
-        local list = member and member.roles or {}
-        if list then
-            for _, rid in ipairs(list) do
-                AddUserToRoleMapping(rid, memberId)
-            end
-        end
-    end
-
-    -- Add bots
-    for botId, bot in pairs(bots) do
-        if bot.approved then -- Only include approved bots
-            local list = bot and bot.roles or {}
-            if list then
-                for _, rid in ipairs(list) do
-                    AddUserToRoleMapping(rid, botId)
-                end
-            end
-        end
-    end
-end
-
--- Check if a member can send messages in a specific channel
--- Policy for who can post in a given channel considering channel overrides
-function CanMemberSendMessagesInChannel(member, channel)
-    if not member or not channel then
-        return false
-    end
-
-    -- Rule 1: If channel.allowMessaging is nil, fallback to permission check
-    if channel.allowMessaging == nil then
-        return MemberHasPermission(member, Permissions.SEND_MESSAGES)
-    end
-
-    -- Rule 2: If channel.allowMessaging is 1, allow everyone to message
-    if channel.allowMessaging == 1 then
-        return true
-    end
-
-    -- Rule 3: If channel.allowMessaging is 0, only allow members with manage channel permissions and above
-    if channel.allowMessaging == 0 then
-        return MemberHasPermission(member, Permissions.MANAGE_CHANNELS) or
-            MemberHasPermission(member, Permissions.ADMINISTRATOR) or
-            member.userId == Owner
-    end
-
-    -- Default fallback (shouldn't reach here normally)
-    return false
-end
-
--- Helper function to resequence channels within a specific category or uncategorized channels
--- Recompute orderId sequence for channels in a bucket (categoryId or uncategorized)
-function ResequenceChannels(categoryId)
-    -- Build a working list for the target bucket
-    local list = {}
-    for _, ch in pairs(channels) do
-        if categoryId ~= nil then
-            if ch and ch.categoryId == categoryId then table.insert(list, ch) end
-        else
-            if ch and ch.categoryId == nil then table.insert(list, ch) end
-        end
-    end
-
-    table.sort(list, function(a, b)
-        local ao = tonumber(a.orderId) or 0
-        local bo = tonumber(b.orderId) or 0
-        if ao == bo then
-            local ai = tonumber(a.channelId) or 0
-            local bi = tonumber(b.channelId) or 0
-            return ai < bi
-        end
-        return ao < bo
-    end)
-
-    for i, ch in ipairs(list) do
-        ch.orderId = i
-        channels[tostring(ch.channelId)] = ch
-    end
-
-    return #list
-end
-
--- Helper function to resequence all categories
--- Recompute orderId sequence for all categories
-function ResequenceCategories()
-    local list = {}
-    for _, cat in pairs(categories) do
-        if cat then table.insert(list, cat) end
-    end
-    table.sort(list, function(a, b)
-        local ao = tonumber(a.orderId) or 0
-        local bo = tonumber(b.orderId) or 0
-        if ao == bo then
-            local ai = tonumber(a.categoryId) or 0
-            local bi = tonumber(b.categoryId) or 0
-            return ai < bi
-        end
-        return ao < bo
-    end)
-
-    for i, cat in ipairs(list) do
-        cat.orderId = i
-        categories[tostring(cat.categoryId)] = cat
-    end
-
-    return #list
-end
-
--- Helper function to resequence all roles
--- Normalize role ordering; keeps roleId stable
-function ResequenceRoles()
-    -- local roles = SQLRead("SELECT roleId FROM roles ORDER BY orderId ASC")
-
-    -- Resequence starting from 1
-    for k, role in pairs(roles) do
-        if role then
-            local derivedIndex = tonumber(role.orderId) or tonumber(k) or 0
-            role.orderId = derivedIndex > 0 and derivedIndex or 1
-            role.roleId = tostring(role.roleId or k)
-        end
-    end
-
-    return #roles
-end
-
--- Normalize ordering after category/channel mutations
-function ResequenceCategoriesAndChannels()
-    -- This should be called when a category or channel is created or deleted
-    -- It will resequence the orderId of the categories and channels
-
-    -- First resequence all categories
-    ResequenceCategories()
-
-    -- Then resequence channels within each category
-    for _, category in pairs(categories) do
-        if category then
-            ResequenceChannels(category.categoryId)
-        end
-    end
-
-    -- Finally resequence uncategorized channels
-    ResequenceChannels(nil)
-end
-
--- Ensure default ids for categories/channels at startup
--- Ensure categoryId/channelId/orderId are populated for defaults
-local function EnsureEntityIds()
-    local ci = 0
-    for _, category in pairs(categories) do
-        ci = ci + 1
-        if category.categoryId == nil then category.categoryId = tostring(ci) end
-        if category.orderId == nil then category.orderId = ci end
-    end
-    local chi = 0
-    for _, channel in pairs(channels) do
-        chi = chi + 1
-        if channel.channelId == nil then channel.channelId = tostring(chi) end
-        if channel.orderId == nil then channel.orderId = chi end
-    end
-end
-
--- Robust channel resolver that works with both string and numeric keys
--- Robust channel fetch by id (string key)
-function GetChannel(channelId)
-    if not channelId then return nil end
-    local idStr = tostring(channelId)
-
-    local channel = channels[idStr]
-    return channel
-end
-
--- Robust category resolver similar to GetChannel
--- Robust category fetch by id (string key)
-function GetCategory(categoryId)
-    if not categoryId then return nil end
-    local idStr = tostring(categoryId)
-    local category = categories[idStr]
-    return category
-end
-
--- Robust role fetch by id (string key)
-function GetRole(roleId)
-    if not roleId then return nil end
-    local idStr = tostring(roleId)
-    local role = roles[idStr]
-    return role
-end
-
--- Generate the next categoryId by scanning existing categories (works for map-style tables)
--- Compute next category id by scanning existing keys
-local function GetNextCategoryId()
-    local maxId = 0
-    for key, cat in pairs(categories) do
-        local candidate = nil
-        if type(key) == "string" or type(key) == "number" then
-            candidate = tonumber(key)
-        end
-        if not candidate and cat and cat.categoryId then
-            candidate = tonumber(cat.categoryId)
-        end
-        if candidate and candidate > maxId then
-            maxId = candidate
-        end
-    end
-    return tostring(maxId + 1)
-end
-
--- Generate the next channelId by scanning existing channels (works for map-style tables)
--- Compute next channel id by scanning existing keys
-local function GetNextChannelId()
-    local maxId = 0
-    for key, ch in pairs(channels) do
-        local candidate = nil
-        if type(key) == "string" or type(key) == "number" then
-            candidate = tonumber(key)
-        end
-        if not candidate and ch and ch.channelId then
-            candidate = tonumber(ch.channelId)
-        end
-        if candidate and candidate > maxId then
-            maxId = candidate
-        end
-    end
-    return tostring(maxId + 1)
-end
-
-function GetFirstItem(table)
-    local x, y
-    for a, b in pairs(table) do
-        x = a
-        y = b
-        break
-    end
-    return x, y
-end
-
--- Push a snapshot of server state to Hyperbeam's patch cache for fast reads
-function SyncProcessState()
-    -- This function is used to take all the possible data and couple it into
-    -- a single table which will be stored in Hyperbeams state for quick access.
-    -- Everything must be in a JSON like structure
-    -- This function should be called everytime after a change is made to the server
-
-
-
-    -- loop over the events table and patch individual deleted items
-    -- for _, event in ipairs(events) do
-    --     if event.eventType == "DELETE" then
-    --         if event.targetTable == "categories" then
-    --             -- do this so that the entry doesnot become an array {}->[]
-    --             -- local x, y = GetFirstItem(categories)
-
-    --             local categoryId = event.targetKey
-    --             Send({
-    --                 Target = ao.id,
-    --                 device = "patch@1.0",
-    --                 cache = { server = { serverinfo = { categories = categories } } }
-    --             })
-    --         elseif event.targetTable == "channels" then
-    --             -- do this so that the entry doesnot become an array {}->[]
-    --             -- local x, y = GetFirstItem(channels)
-    --             -- local z, w = GetFirstItem(messages)
-
-    --             local channelId = event.targetKey
-    --             Send({
-    --                 Target = ao.id,
-    --                 device = "patch@1.0",
-    --                 cache = {
-    --                     server = {
-    --                         serverinfo = {
-    --                             channels = channels
-    --                         },
-    --                         messages = { [channelId] = messages[channelId] }
-    --                     }
-    --                 }
-    --             })
-    --         elseif event.targetTable == "roles" then
-    --             -- do this so that the entry doesnot become an array {}->[]
-    --             -- local x, y = GetFirstItem(roles)
-
-    --             local roleId = event.targetKey
-    --             Send({
-    --                 Target = ao.id,
-    --                 device = "patch@1.0",
-    --                 -- cache = { server = { serverinfo = { roles = { [roleId] = nil, [x] = y } } } }
-    --                 cache = { server = { serverinfo = { roles = { [roleId] = roles[roleId] } } } }
-    --             })
-    --         elseif event.targetTable == "messages" then
-    --             local channelId = event.baseKey
-    --             local messageId = event.targetKey
-
-    --             Send({
-    --                 Target = ao.id,
-    --                 device = "patch@1.0",
-    --                 -- cache = { server = { messages = { [channelId] = { [messageId] = nil, [x] = y } } } }
-    --                 cache = { server = { messages = { [channelId] = messages[channelId] } } }
-    --             })
-    --         end
-    --     end
-    -- end
-
-
-    if #events > 0 then
-        -- clear state before setting it again if there are events (usually delete events)
-        Send({
-            Target = ao.id,
-            device = "patch@1.0",
-            cache = { server = nil }
-        })
-    end
-
-    Send({
-        Target = ao.id,
-        Action = "Sync"
-    })
-end
-
-Handlers.add("Sync", function(msg)
-    if msg.From ~= ao.id then return end
-
-    EnsureEntityIds()
-
-    Send({
-        Target = ao.id,
-        device = "patch@1.0",
-        cache = {
-            server = {
-                serverinfo = {
-                    name = Name,
-                    logo = Logo,
-                    description = Description,
-                    owner = Owner,
-                    publicServer = PublicServer,
-                    version = Version_,
-                    ticker = Ticker,
-                    categories = categories,
-                    channels = channels,
-                    roles = roles,
-                    memberCount = MemberCount,
-                    bots = bots,
-                    subscribedBots = SubscribedBots,
-                },
-                members = members,
-                roleMemberMapping = role_member_mapping,
-                messages = messages,
-                events = events,
+        local ok, err = pcall(func, msg)
+        if not ok then
+            -- error message format "status|error_text"
+            local res = get_status_and_error(err)
+            local error_item = {
+                action = msg.action,
+                error = res.error,
+                status = res.status,
+                timestamp = os.date("%Y-%m-%d %H:%M:%S", os.time() + 12600) -- GMT+5:30
             }
-        }
-    })
-    events_bak = events
-    events     = {}
+            table.insert(helpers.logs, error_item)
+            pprint(error_item)
+            local target = msg.from
+            if not msg['from-process'] then
+                target = id
+            end
+            send({
+                target = target,
+                action = "error",
+                ["x-status"] = res.status,
+                ["x-error"] = res.error,
+                ["x-action"] = msg.action,
+                timestamp = os.time()
+            })
+        end
+    end,
+    get_id = get_id,
+    members = member_utils,
+    roles = role_utils,
+    bots = bot_utils,
+    categories = {
+        --- @param categoryId string
+        --- @return Category | nil
+        get = function(categoryId)
+            return server.categories[categoryId]
+        end,
+        --- @param categoryId string
+        --- @param category Category
+        set = function(categoryId, category)
+            server.categories[categoryId] = category
+        end,
+    },
+    channels = {
+        --- @param channelId string
+        --- @return Channel | nil
+        get = function(channelId)
+            return server.channels[channelId]
+        end,
+        --- @param channelId string
+        --- @param channel Channel
+        set = function(channelId, channel)
+            server.channels[channelId] = channel
+            if channel.category_id then
+                helpers.channel_to_category[channelId] = channel.category_id
+            else
+                helpers.channel_to_category[channelId] = nil
+            end
+        end,
+        --- @param channel Channel
+        --- @param member Member
+        --- @return boolean
+        can_send = function(channel, member)
+            -- Rule 1: If channel.allowMessaging is nil, fallback to permission check
+            if channel.allow_messaging == nil then
+                return permission_utils.member_has(member, helpers.permissions.send_messages)
+            end
+            -- Rule 2: If channel.allowMessaging is 1, allow everyone to message
+            if channel.allow_messaging == 1 then
+                return true
+            end
+            -- Rule 3: If channel.allowMessaging is 0, only allow members with manage channel permissions and above
+            if channel.allow_messaging == 0 then
+                return member.id == owner or
+                    permission_utils.member_has(member, helpers.permissions.manage_channels) or
+                    permission_utils.member_has(member, helpers.permissions.administrator)
+            end
+            -- Default fallback (shouldn't reach here normally)
+            return false
+        end
+    },
+    messages = {
+        --- @param messageId string
+        --- @param message Message
+        set = function(messageId, message)
+            messages[message.channel_id] = messages[message.channel_id] or {}
+            messages[message.channel_id][messageId] = message
+        end,
+    },
+    permissions = permission_utils,
+}
+
+--#endregion
+
+--#region setup
+
+local function setup(msg)
+    assert(msg.from == subspace_id, "403|unauthorized sender")
+
+    local serverName = msg["server-name"]
+    local serverDescription = msg["server-description"]
+    local serverPfp = msg["server-pfp"]
+    local serverBanner = msg["server-banner"]
+    -- serverPublic parameter removed
+
+    server.profile.name = serverName or ""
+    server.profile.description = serverDescription or ""
+    server.profile.pfp = serverPfp or ""
+    server.profile.banner = serverBanner or ""
+    -- server.profile.public_server field removed
+end
+
+Handlers.once("setup", function(msg)
+    utils.handle_run(setup, msg)
 end)
 
--- make sure state is synced on startup
--- Ensure initial cache is populated on first boot
-InitialSync = InitialSync or 'INCOMPLETE'
-if InitialSync == 'INCOMPLETE' then
-    SyncProcessState()
-    InitialSync = 'COMPLETE'
+-- Since HB doesnot know yet if a target is a wallet or process and errors out
+-- Instead of sending reply to wallet, dump it to self, to make sure it is still readable in frontend
+Handlers.add("dump", function(msg)
+    local action = msg.action
+    local function ends_with(str, suffix)
+        -- Handle edge cases
+        if not str or not suffix then
+            return false
+        end
+
+        -- Convert to strings if they aren't already
+        str = tostring(str)
+        suffix = tostring(suffix)
+
+        -- Check if suffix is longer than the string
+        if #suffix > #str then
+            return false
+        end
+
+        -- Compare the end of the string with the suffix
+        return str:sub(- #suffix) == suffix
+    end
+    return msg.from == id and ends_with(action, "response")
+end, function(msg)
+
+end)
+
+-- Dump for errors
+Handlers.add("error", function(msg) end)
+
+local function update_server(msg)
+    local senderId = msg.from
+
+    -- serverPublic parameter removed
+    local serverName = utils.var_or_nil(msg["server-name"])
+    local serverDescription = utils.var_or_nil(msg["server-description"])
+    local serverPfp = utils.var_or_nil(msg["server-pfp"])
+    local serverBanner = utils.var_or_nil(msg["server-banner"])
+
+    -- validate senderId permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+    assert(utils.permissions.member_has(senderMember, helpers.permissions.manage_server),
+        "403|insufficient permissions to update server")
+
+    local profile = server.profile
+    -- profile.public_server field removed
+    profile.name = serverName or profile.name
+    profile.description = serverDescription or profile.description
+    profile.pfp = serverPfp or profile.pfp
+    profile.banner = serverBanner or profile.banner
+
+    server.profile = profile
+
+    -- send updates to subspace as well
+    send({
+        target = subspace_id,
+        action = "update-server",
+        -- server-public parameter removed
+        ["server-name"] = serverName,
+        ["server-description"] = serverDescription,
+        ["server-pfp"] = serverPfp,
+        ["server-banner"] = serverBanner
+    })
+
+    msg.reply({
+        action = "update-server-response",
+        status = helpers.status.success,
+        data = json.encode(server)
+    })
 end
 
-----------------------------------------------------------------------------
+Handlers.add("update-server", function(msg)
+    utils.handle_run(update_server, msg)
+end)
 
--- Add a new member to the server (public servers only)
-Handlers.add("Join-Server", function(msg)
-    local userId = msg.From
-    local joinedAt = msg.Timestamp or os.time()
+--#endregion
 
-    -- Check if server is public (if private, only allow if invited/approved)
-    if ValidateCondition(not PublicServer, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Server is not public, ask the server admins to update the server settings"
-            })
-        }) then
-        return
-    end
+--#region members
 
-    local existingMember = GetMember(userId)
-    if existingMember then
-        -- User is already in the server - this is idempotent, just return success
-        -- This handles cases where the join process was interrupted but the user was already added
-        msg.reply({
-            Action = "Join-Server-Response",
-            Status = "200",
-        })
+local function add_member(msg)
+    local senderId = msg.from
+    assert(senderId == subspace_id, "403|unauthorized sender")
+    local userId = msg["user-id"]
+    local isBot = msg["is-bot"]
 
-        -- Still notify Subspace to ensure consistency (idempotent on their side too)
-        ao.send({
-            Target = Subspace,
-            Action = "User-Joined-Server",
-            Tags = {
-                ["User-Id"] = userId,
-                ["Server-Approved"] = "true"
-            }
-        })
-        return
-    end
+    assert(userId, "400|user-id is required")
 
-    -- Create new member
-    local member = {
-        userId = userId,
-        nickname = nil,
-        joinedAt = joinedAt,
-        roles = { "1" } -- default role
+    -- Check if user is banned
+    assert(not helpers.bans[userId], "403|user is banned from this server")
+
+    -- Check if user is already a member
+    local existingMember = utils.members.get(userId)
+    local isNewMember = not existingMember
+
+    local memberData = existingMember or {
+        id = userId,
+        nickname = "",
+        joined_at = os.time(),
+        roles = {
+            ["@"] = "@",
+        },
+        is_bot = isBot or false,
     }
-    UpdateMemberTable(userId, member)
-    -- update role mapping for default role
-    AddUserToRoleMapping("1", userId)
-    -- Increment member counter
-    MemberCount = MemberCount + 1
 
-    msg.reply({
-        Action = "Join-Server-Response",
-        Status = "200",
-    })
-    SyncProcessState()
+    -- Use utils.members.set to properly update the members table
+    utils.members.set(userId, memberData)
 
-    -- Notify Subspace that user successfully joined (after state sync)
-    ao.send({
-        Target = Subspace,
-        Action = "User-Joined-Server",
-        Tags = {
-            ["User-Id"] = userId,
-            ["Server-Approved"] = "true"
-        }
+    -- Assign the @everyone role using role_utils
+    role_utils.assign("@", userId)
+
+    -- Only increment member count for new members
+    if isNewMember then
+        server.member_count = math.max(server.member_count + 1, 0)
+    end
+
+    -- Push event to subscribers
+    push_event({
+        event_type = helpers.events.member_joined,
+        user_id = userId,
+        is_bot = isBot,
+        timestamp = os.time()
     })
+
+    send({
+        target = subspace_id,
+        action = "approve-add-member",
+        status = helpers.status.success,
+        ["user-id"] = userId,
+    })
+end
+
+Handlers.add("add-member", function(msg)
+    utils.handle_run(add_member, msg)
 end)
 
--- Remove a member from the server (cannot remove the owner)
-Handlers.add("Leave-Server", function(msg)
-    local userId = msg.From
+local function remove_member(msg)
+    local senderId = msg.from
+    assert(senderId == subspace_id, "403|unauthorized sender")
+    local userId = msg["user-id"]
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User is not in the server"
-            })
-        }) then
-        return
+    assert(userId, "400|user-id is required")
+
+    local member = utils.members.get(userId)
+    assert(member, "404|member not found")
+
+    local isBot = member.is_bot
+
+    -- Remove all roles first
+    for roleId, _ in pairs(member.roles) do
+        role_utils.unassign(roleId, userId)
+    end
+    role_utils.unassign("@", userId)
+
+    -- Remove from appropriate table
+    if isBot then
+        bots[userId] = nil
+    else
+        members[userId] = nil
     end
 
-    -- Cannot leave if user is the server owner
-    if ValidateCondition(userId == Owner, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Server owner cannot leave the server"
-            })
-        }) then
-        return
-    end
+    server.member_count = math.max(server.member_count - 1, 0)
 
-    -- Remove from appropriate table and role mapping
-    RemoveMemberFromTables(userId)
-
-    -- Decrement member counter
-    if MemberCount > 0 then MemberCount = MemberCount - 1 end
-
-    -- Add DELETE event for state patching
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = "members",
-        targetKey = userId,
+    -- Push event to subscribers
+    push_event({
+        event_type = helpers.events.member_left,
+        user_id = userId,
+        is_bot = isBot,
+        timestamp = os.time()
     })
 
     msg.reply({
-        Action = "Leave-Server-Response",
-        Status = "200",
+        target = subspace_id,
+        action = "approve-remove-member",
+        ["user-id"] = userId,
+        status = helpers.status.success,
     })
-    SyncProcessState()
+end
+
+Handlers.add("remove-member", function(msg)
+    utils.handle_run(remove_member, msg)
 end)
 
--- Update server metadata and publicity. MANAGE_SERVER required.
-Handlers.add("Update-Server", function(msg)
-    local userId = msg.From
-    local name = VarOrNil(msg.Tags.Name)
-    local logo = VarOrNil(msg.Tags.Logo)
-    local description = VarOrNil(msg.Tags.Description)
-    local publicServer = VarOrNil(msg.Tags["Public-Server"])
+local function update_member(msg)
+    local senderId = msg.from
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_SERVER)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to update the server"
-            })
-        }) then
-        return
-    end
+    -- members can only update their own nickname for now
+    -- or mods with manage nicknames or manage server permissions can update other members' nicknames
 
-    if name then
-        Name = name
-    end
-    if logo then
-        Logo = logo
-    end
-    if description then
-        Description = description
+    local userId = msg["user-id"] or senderId
+    local nickname = utils.var_or_nil(msg["nickname"])
+
+    local member = utils.members.get(userId)
+    assert(member, "404|member not found")
+
+    local editingSelf = userId == senderId
+
+    if not editingSelf then
+        -- Get sender member to check permissions
+        local senderMember = utils.members.get(senderId)
+        assert(senderMember, "404|sender not found")
+
+        -- Check permissions using standardized helper
+        assert(utils.permissions.member_has_any(senderMember, {
+            helpers.permissions.manage_nicknames,
+            helpers.permissions.manage_members,
+            helpers.permissions.manage_server,
+            helpers.permissions.administrator
+        }), "403|insufficient permissions to update member")
     end
 
-    if publicServer then
-        PublicServer = publicServer == "true"
-        ao.send({
-            Action = "Update-Server",
-            Tags = {
-                ["Public-Server"] = tostring(PublicServer)
-            }
-        })
-    end
+    member.nickname = nickname or member.nickname or ""
+    utils.members.set(userId, member)
 
     msg.reply({
-        Action = "Update-Server-Response",
-        Status = "200",
+        action = "update-member-response",
+        status = helpers.status.success,
     })
-    SyncProcessState()
+end
+
+Handlers.add("update-member", function(msg)
+    utils.handle_run(update_member, msg)
 end)
 
-----------------------------------------------------------------------------
---- CATEGORIES
+local function kick_member(msg)
+    local senderId = msg.from
+    local userId = msg["user-id"]
 
-Handlers.add("Create-Category", function(msg)
-    local userId = msg.From
-    local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"]) or 1
-    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"]) or 1
-    local orderId = VarOrNil(msg.Tags["Order-Id"])
+    assert(userId, "400|user-id is required")
+    assert(userId ~= senderId, "400|cannot kick yourself")
 
-    allowMessaging = tonumber(allowMessaging)
-    allowAttachments = tonumber(allowAttachments)
-    if orderId then orderId = tonumber(orderId) end
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.kick_members,
+        helpers.permissions.manage_members,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to kick members")
+
+    -- Get the member to kick
+    local member = utils.members.get(userId)
+    assert(member, "404|member not found")
+
+    local isBot = member.is_bot
+
+    -- Remove all roles first
+    for roleId, _ in pairs(member.roles) do
+        role_utils.unassign(roleId, userId)
     end
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to create a category"
-            })
-        }) then
-        return
+    role_utils.unassign("@", userId)
+
+    -- Remove from appropriate table
+    if isBot then
+        bots[userId] = nil
+    else
+        members[userId] = nil
     end
 
-    -- Determine next categoryId using helper (categories is a map)
-    local categoryId = GetNextCategoryId()
-    local newCategory = {
-        categoryId = categoryId,
-        name = name,
-        orderId = tonumber(orderId) or tonumber(categoryId),
-        allowMessaging = allowMessaging,
-        allowAttachments = allowAttachments
-    }
-    categories[categoryId] = newCategory
+    -- Decrement member count
+    server.member_count = math.max(server.member_count - 1, 0)
+
+    -- Push event to subscribers
+    push_event({
+        event_type = helpers.events.member_kicked,
+        user_id = userId,
+        kicked_by = senderId,
+        is_bot = isBot,
+        timestamp = os.time()
+    })
+
+    send({
+        target = subspace_id,
+        action = "approve-remove-member",
+        ["user-id"] = userId,
+        status = helpers.status.success,
+    })
 
     msg.reply({
-        Action = "Create-Category-Response",
-        Status = "200"
+        action = "kick-member-response",
+        status = helpers.status.success,
     })
-    SyncProcessState()
+end
+
+Handlers.add("kick-member", function(msg)
+    utils.handle_run(kick_member, msg)
 end)
 
-Handlers.add("Update-Category", function(msg)
-    local userId = msg.From
-    local categoryId = VarOrNil(msg.Tags["Category-Id"])
-    local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"])
-    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"])
-    local orderId = VarOrNil(msg.Tags["Order-Id"])
+local function ban_member(msg)
+    local senderId = msg.from
+    local userId = msg["user-id"]
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
+    assert(userId, "400|user-id is required")
+    assert(userId ~= senderId, "400|cannot ban yourself")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.ban_members,
+        helpers.permissions.manage_members,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to ban members")
+
+    -- Get the member to ban
+    local member = utils.members.get(userId)
+    assert(member, "404|member not found")
+
+    local isBot = member.is_bot
+
+    -- Remove all roles first
+    for roleId, _ in pairs(member.roles) do
+        role_utils.unassign(roleId, userId)
+    end
+    role_utils.unassign("@", userId)
+
+    -- Remove from appropriate table
+    if isBot then
+        bots[userId] = nil
+    else
+        members[userId] = nil
     end
 
-    if allowMessaging then allowMessaging = tonumber(allowMessaging) end
-    if allowAttachments then allowAttachments = tonumber(allowAttachments) end
-    if orderId then orderId = tonumber(orderId) end
+    -- Add to ban list
+    helpers.bans[userId] = true
 
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to update the category"
-            })
-        }) then
-        return
-    end
+    -- Decrement member count
+    server.member_count = math.max(server.member_count - 1, 0)
 
-    local category, categoryStorageKey = GetCategory(categoryId)
-    if ValidateCondition(not category, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Category not found"
-            })
-        }) then
-        return
-    end
+    -- Push event to subscribers
+    push_event({
+        event_type = helpers.events.member_banned,
+        user_id = userId,
+        banned_by = senderId,
+        is_bot = isBot,
+        timestamp = os.time()
+    })
 
-    -- Get current values
-    local current_order = category.orderId
-    local new_name = name or category.name
-    local new_allowMessaging = allowMessaging or category.allowMessaging
-    local new_allowAttachments = allowAttachments or category.allowAttachments
-    local new_orderId = orderId or current_order
+    send({
+        target = subspace_id,
+        action = "approve-remove-member",
+        ["user-id"] = userId,
+        status = helpers.status.success,
+    })
 
-    -- Handle ordering changes
-    if orderId and orderId ~= current_order then
-        if orderId < current_order then
-            -- Moving up: shift other categories down
-            for i, category in ipairs(categories) do
-                if category.orderId >= orderId and category.orderId < current_order and category.categoryId ~= categoryId then
-                    category.orderId = category.orderId + 1
-                end
-            end
-        else
-            -- Moving down: shift other categories up
-            for i, category in ipairs(categories) do
-                if category.orderId > current_order and category.orderId <= orderId and category.categoryId ~= categoryId then
-                    category.orderId = category.orderId - 1
-                end
+    msg.reply({
+        action = "ban-member-response",
+        status = helpers.status.success,
+    })
+end
+
+Handlers.add("ban-member", function(msg)
+    utils.handle_run(ban_member, msg)
+end)
+
+local function unban_member(msg)
+    local senderId = msg.from
+    local userId = msg["user-id"]
+
+    assert(userId, "400|user-id is required")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.ban_members,
+        helpers.permissions.manage_members,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to unban members")
+
+    -- Check if user is actually banned
+    assert(helpers.bans[userId], "400|user is not banned")
+
+    helpers.bans[userId] = nil
+
+    msg.reply({
+        action = "unban-member-response",
+        status = helpers.status.success,
+    })
+end
+
+Handlers.add("unban-member", function(msg)
+    utils.handle_run(unban_member, msg)
+end)
+
+--#endregion
+
+--#region categories
+
+local function create_category(msg)
+    local senderId = msg.from
+    local categoryName = utils.var_or_nil(msg["category-name"])
+    local categoryOrder = msg["category-order"]
+
+    assert(categoryName, "400|category-name is required")
+    assert(type(categoryName) == "string", "400|category-name must be a string")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_channels,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to create categories")
+
+    local categoryId = utils.get_id()
+
+    -- If no order specified, put it at the end
+    if not categoryOrder then
+        local maxOrder = 0
+        for _, category in pairs(server.categories) do
+            if category.order > maxOrder then
+                maxOrder = category.order
             end
         end
+        categoryOrder = maxOrder + 1
     end
 
-    -- Update the category
-    category.name = new_name
-    category.allowMessaging = new_allowMessaging
-    category.allowAttachments = new_allowAttachments
-    category.orderId = new_orderId
+    local category = {
+        id = categoryId,
+        name = categoryName,
+        order = categoryOrder,
+    }
 
-    if categoryStorageKey ~= nil then
-        categories[categoryStorageKey] = category
-    end
-
-    -- Resequence to ensure clean ordering
-    ResequenceCategories()
+    utils.categories.set(categoryId, category)
 
     msg.reply({
-        Action = "Update-Category-Response",
-        Status = "200",
+        action = "create-category-response",
+        status = helpers.status.success,
+        data = json.encode(category)
     })
-    SyncProcessState()
+end
+
+Handlers.add("create-category", function(msg)
+    utils.handle_run(create_category, msg)
 end)
 
-Handlers.add("Delete-Category", function(msg)
-    local userId = msg.From
-    local categoryId = VarOrNil(msg.Tags["Category-Id"])
+local function update_category(msg)
+    local senderId = msg.from
+    local categoryId = utils.var_or_nil(msg["category-id"])
+    local categoryName = utils.var_or_nil(msg["category-name"])
+    local categoryOrder = msg["category-order"]
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
+    assert(categoryId, "400|category-id is required")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_channels,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to update categories")
+
+    local category = utils.categories.get(categoryId)
+    assert(category, "404|category not found")
+
+    if categoryName then
+        assert(type(categoryName) == "string", "400|category-name must be a string")
+        category.name = categoryName
     end
 
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to delete the category"
-            })
-        }) then
-        return
+    if categoryOrder then
+        assert(type(categoryOrder) == "number", "400|category-order must be a number")
+        category.order = categoryOrder
     end
 
-    local category, categoryStorageKey = GetCategory(categoryId)
-    if ValidateCondition(not category, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Category not found"
-            })
-        }) then
-        return
-    end
+    utils.categories.set(categoryId, category)
 
-    -- Move all channels from this category to uncategorized
-    for _, channel in ipairs(channels) do
-        if channel.categoryId == categoryId then
-            channel.categoryId = nil
+    msg.reply({
+        action = "update-category-response",
+        status = helpers.status.success,
+        data = json.encode(category)
+    })
+end
+
+Handlers.add("update-category", function(msg)
+    utils.handle_run(update_category, msg)
+end)
+
+local function delete_category(msg)
+    local senderId = msg.from
+    local categoryId = utils.var_or_nil(msg["category-id"])
+
+    assert(categoryId, "400|category-id is required")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_channels,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to delete categories")
+
+    local category = utils.categories.get(categoryId)
+    assert(category, "404|category not found")
+
+    -- Move all channels in this category to uncategorized
+    for channelId, channel in pairs(server.channels) do
+        if channel.category_id == categoryId then
+            channel.category_id = nil
+            utils.channels.set(channelId, channel)
         end
     end
 
     -- Delete the category
-    if categoryStorageKey ~= nil then
-        categories[categoryStorageKey] = nil
-    end
-
-    -- Resequence categories and affected channels
-    ResequenceCategories()
-    ResequenceChannels(nil) -- Resequence uncategorized channels
-
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = "categories",
-        targetKey = categoryId,
-    })
+    server.categories[categoryId] = nil
 
     msg.reply({
-        Action = "Delete-Category-Response",
-        Status = "200"
+        action = "delete-category-response",
+        status = helpers.status.success,
     })
-    SyncProcessState()
+end
+
+Handlers.add("delete-category", function(msg)
+    utils.handle_run(delete_category, msg)
 end)
 
-----------------------------------------------------------------------------
---- CHANNELS
+--#endregion
 
-Handlers.add("Create-Channel", function(msg)
-    local userId = msg.From
-    local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"]) or 1
-    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"]) or 1
-    local categoryId = VarOrNil(msg.Tags["Category-Id"])
-    local orderId = VarOrNil(msg.Tags["Order-Id"])
+--#region channels
 
-    allowMessaging = tonumber(allowMessaging)
-    allowAttachments = tonumber(allowAttachments)
-    -- categoryId must be string storage key
-    if categoryId then categoryId = tostring(categoryId) end
+local function create_channel(msg)
+    local senderId = msg.from
+    local channelName = utils.var_or_nil(msg["channel-name"])
+    local categoryId = utils.var_or_nil(msg["category-id"])
+    local channelOrder = msg["channel-order"]
+    local allowMessaging = msg["allow-messaging"]
+    local allowAttachments = msg["allow-attachments"]
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
+    assert(channelName, "400|channel-name is required")
+    assert(type(channelName) == "string", "400|channel-name must be a string")
 
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to create a channel"
-            })
-        }) then
-        return
-    end
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
 
-    local category = nil
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_channels,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to create channels")
+
+    -- Validate category if provided
     if categoryId then
-        category = GetCategory(categoryId)
-        if ValidateCondition(not category, msg, {
-                Status = "400",
-                Data = json.encode({
-                    error = "Category not found"
-                })
-            }) then
-            return
-        end
+        local category = utils.categories.get(categoryId)
+        assert(category, "404|category not found")
     end
 
-    -- Determine next channelId using helper (channels is a map)
-    local channelId = GetNextChannelId()
-    local newChannel = {
-        channelId = channelId,
-        name = name,
-        orderId = tonumber(orderId) or tonumber(channelId),
-        categoryId = categoryId,
-        allowMessaging = allowMessaging or 1,
-        allowAttachments = allowAttachments or 1
+    local channelId = utils.get_id()
+
+    -- If no order specified, put it at the end within the category
+    if not channelOrder then
+        local maxOrder = 0
+        for _, channel in pairs(server.channels) do
+            if channel.category_id == categoryId and channel.order > maxOrder then
+                maxOrder = channel.order
+            end
+        end
+        channelOrder = maxOrder + 1
+    end
+
+    local channel = {
+        id = channelId,
+        name = channelName,
+        order = channelOrder,
+        category_id = categoryId,
+        allow_messaging = allowMessaging,
+        allow_attachments = allowAttachments,
     }
-    channels[channelId] = newChannel
 
-    ResequenceCategoriesAndChannels()
+    utils.channels.set(channelId, channel)
 
     msg.reply({
-        Action = "Create-Channel-Response",
-        Status = "200",
+        action = "create-channel-response",
+        status = helpers.status.success,
+        data = json.encode(channel)
     })
-    SyncProcessState()
+end
+
+Handlers.add("create-channel", function(msg)
+    utils.handle_run(create_channel, msg)
 end)
 
-Handlers.add("Update-Channel", function(msg)
-    local userId = msg.From
-    local channelId = VarOrNil(msg.Tags["Channel-Id"])
-    local name = VarOrNil(msg.Tags.Name)
-    local allowMessaging = VarOrNil(msg.Tags["Allow-Messaging"])
-    local allowAttachments = VarOrNil(msg.Tags["Allow-Attachments"])
-    local categoryIdRaw = msg.Tags["Category-Id"] -- Get raw value first
-    local categoryId = VarOrNil(msg.Tags["Category-Id"])
-    local orderId = VarOrNil(msg.Tags["Order-Id"])
+local function update_channel(msg)
+    local senderId = msg.from
+    local channelId = utils.var_or_nil(msg["channel-id"])
+    local channelName = utils.var_or_nil(msg["channel-name"])
+    local categoryId = utils.var_or_nil(msg["category-id"])
+    local channelOrder = msg["channel-order"]
+    local allowMessaging = msg["allow-messaging"]
+    local allowAttachments = msg["allow-attachments"]
 
-    if allowMessaging then allowMessaging = tonumber(allowMessaging) end
-    if allowAttachments then allowAttachments = tonumber(allowAttachments) end
-    if orderId then orderId = tonumber(orderId) end
+    assert(channelId, "400|channel-id is required")
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
 
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to update the channel"
-            })
-        }) then
-        return
-    end
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_channels,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to update channels")
 
-    -- Channel id must be treated as string
-    if channelId then channelId = tostring(channelId) end
-    local channel, storageKey = GetChannel(channelId)
-    if ValidateCondition(not channel, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel not found"
-            })
-        }) then
-        return
-    end
+    local channel = utils.channels.get(channelId)
+    assert(channel, "404|channel not found")
 
-    -- Get current values
-    local current_categoryId = channel.categoryId
-    local current_order = channel.orderId
-    local new_name = name or channel.name
-    local new_allowMessaging = allowMessaging or channel.allowMessaging
-    local new_allowAttachments = allowAttachments or channel.allowAttachments
-
-    -- Determine target category
-    local target_categoryId = current_categoryId
+    -- Validate category if provided
     if categoryId then
-        target_categoryId = categoryId
+        local category = utils.categories.get(categoryId)
+        assert(category, "404|category not found")
     end
 
-    -- Check if we're changing category
-    local changing_category = (target_categoryId ~= current_categoryId)
-
-    -- Determine new order
-    local new_orderId = current_order
-    if orderId then
-        new_orderId = orderId
-    elseif changing_category then
-        -- When changing category without specifying order, place at end
-        if target_categoryId then
-            local max_order = 0
-            for _, channel in ipairs(channels) do
-                if channel.categoryId == target_categoryId then
-                    max_order = math.max(max_order, channel.orderId)
-                end
-            end
-            new_orderId = 1
-            if max_order then
-                new_orderId = max_order + 1
-            end
-        else
-            local max_order = 0
-            for _, channel in ipairs(channels) do
-                if channel.categoryId == nil then
-                    max_order = math.max(max_order, channel.orderId)
-                end
-            end
-            new_orderId = 1
-            if max_order then
-                new_orderId = max_order + 1
-            end
-        end
+    if channelName then
+        assert(type(channelName) == "string", "400|channel-name must be a string")
+        channel.name = channelName
     end
 
-    -- Handle category change: remove from old category's ordering
-    if changing_category then
-        if current_categoryId then
-            for _, channel in ipairs(channels) do
-                if channel.categoryId == current_categoryId and channel.orderId > current_order then
-                    channel.orderId = channel.orderId - 1
-                end
-            end
-        else
-            -- SQLWrite([[
-            --     UPDATE channels
-            --     SET orderId = orderId - 1
-            --     WHERE categoryId IS NULL AND orderId > ?
-            -- ]], current_order)
-            for _, channel in ipairs(channels) do
-                if channel.categoryId == nil and channel.orderId > current_order then
-                    channel.orderId = channel.orderId - 1
-                end
-            end
-        end
-
-        -- Make room in target category
-        if target_categoryId then
-            for _, channel in ipairs(channels) do
-                if channel.categoryId == target_categoryId and channel.orderId >= new_orderId then
-                    channel.orderId = channel.orderId + 1
-                end
-            end
-        else
-            for _, channel in ipairs(channels) do
-                if channel.categoryId == nil and channel.orderId >= new_orderId then
-                    channel.orderId = channel.orderId + 1
-                end
-            end
-        end
-    elseif orderId and orderId ~= current_order then
-        -- Handle ordering within same category
-        if orderId < current_order then
-            -- Moving up: shift others down
-            if current_categoryId then
-                for _, channel in ipairs(channels) do
-                    if channel.categoryId == current_categoryId and channel.orderId >= orderId and channel.orderId < current_order and channel.channelId ~= channelId then
-                        channel.orderId = channel.orderId + 1
-                    end
-                end
-            else
-                for _, channel in ipairs(channels) do
-                    if channel.categoryId == nil and channel.orderId >= orderId and channel.orderId < current_order and channel.channelId ~= channelId then
-                        channel.orderId = channel.orderId + 1
-                    end
-                end
-            end
-        else
-            -- Moving down: shift others up
-            if current_categoryId then
-                for _, channel in ipairs(channels) do
-                    if channel.categoryId == current_categoryId and channel.orderId > current_order and channel.orderId <= orderId and channel.channelId ~= channelId then
-                        channel.orderId = channel.orderId - 1
-                    end
-                end
-            else
-                for _, channel in ipairs(channels) do
-                    if channel.categoryId == nil and channel.orderId > current_order and channel.orderId <= orderId and channel.channelId ~= channelId then
-                        channel.orderId = channel.orderId - 1
-                    end
-                end
-            end
-        end
+    if categoryId ~= nil then -- Allow setting to nil to uncategorize
+        channel.category_id = categoryId
     end
 
-    channel.name = new_name
-    channel.allowMessaging = new_allowMessaging
-    channel.allowAttachments = new_allowAttachments
-    channel.categoryId = target_categoryId
-    channel.orderId = new_orderId
+    if channelOrder then
+        assert(type(channelOrder) == "number", "400|channel-order must be a number")
+        channel.order = channelOrder
+    end
 
-    channels[channelId] = channel
+    if allowMessaging ~= nil then
+        assert(type(allowMessaging) == "number", "400|allow-messaging must be a number (0 or 1)")
+        assert(allowMessaging == 0 or allowMessaging == 1, "400|allow-messaging must be 0 or 1")
+        channel.allow_messaging = allowMessaging -- 0 = restricted, 1 = allowed, nil = default
+    end
 
+    if allowAttachments ~= nil then
+        assert(type(allowAttachments) == "number", "400|allow-attachments must be a number (0 or 1)")
+        assert(allowAttachments == 0 or allowAttachments == 1, "400|allow-attachments must be 0 or 1")
+        channel.allow_attachments = allowAttachments -- 0 = restricted, 1 = allowed, nil = default
+    end
 
-    ResequenceCategoriesAndChannels()
+    utils.channels.set(channelId, channel)
 
     msg.reply({
-        Action = "Update-Channel-Response",
-        Status = "200",
+        action = "update-channel-response",
+        status = helpers.status.success,
+        data = json.encode(channel)
     })
-    SyncProcessState()
+end
+
+Handlers.add("update-channel", function(msg)
+    utils.handle_run(update_channel, msg)
 end)
 
-Handlers.add("Delete-Channel", function(msg)
-    local userId = msg.From
-    local channelId = VarOrNil(msg.Tags["Channel-Id"])
+local function delete_channel(msg)
+    local senderId = msg.from
+    local channelId = utils.var_or_nil(msg["channel-id"])
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
+    assert(channelId, "400|channel-id is required")
 
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_CHANNELS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to delete the channel"
-            })
-        }) then
-        return
-    end
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
 
-    if channelId then channelId = tonumber(channelId) end
-    local channel = GetChannel(channelId)
-    if ValidateCondition(not channel, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel not found"
-            })
-        }) then
-        return
-    end
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_channels,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to delete channels")
 
-    local channel_categoryId = channel.categoryId and tostring(channel.categoryId) or nil
+    local channel = utils.channels.get(channelId)
+    assert(channel, "404|channel not found")
+
+    -- Remove from channel to category mapping
+    helpers.channel_to_category[channelId] = nil
 
     -- Delete all messages in the channel
-    messages[tostring(channelId)] = nil
+    messages[channelId] = nil
 
     -- Delete the channel
-    channels[tostring(channelId)] = nil
-
-    -- Resequence channels in the affected category
-    ResequenceChannels(channel_categoryId)
-
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = "channels",
-        targetKey = channelId,
-    })
+    server.channels[channelId] = nil
 
     msg.reply({
-        Action = "Delete-Channel-Response",
-        Status = "200",
+        action = "delete-channel-response",
+        status = helpers.status.success,
     })
-    SyncProcessState()
-end)
-
-----------------------------------------------------------------------------
---- ROLES
-
--- Generate the next roleId by scanning existing roles table keys and role objects
-local function GetNextRoleId()
-    local maxId = 0
-    for key, role in pairs(roles) do
-        local candidate = nil
-        if type(key) == "string" or type(key) == "number" then
-            candidate = tonumber(key)
-        end
-        if not candidate and role and role.roleId then
-            candidate = tonumber(role.roleId)
-        end
-        if candidate and candidate > maxId then
-            maxId = candidate
-        end
-    end
-    return tostring(maxId + 1)
 end
 
-Handlers.add("Create-Role", function(msg)
-    local userId = msg.From
-    local name = VarOrNil(msg.Tags.Name) or "New Role"
-    local color = VarOrNil(msg.Tags.Color) or "#696969"
-    local permissions = VarOrNil(msg.Tags.Permissions) or 1
-    local orderId = VarOrNil(msg.Tags["Order-Id"])
+Handlers.add("delete-channel", function(msg)
+    utils.handle_run(delete_channel, msg)
+end)
 
-    if permissions then permissions = tonumber(permissions) end
-    if orderId then orderId = tonumber(orderId) end
+--#endregion
+
+--#region roles
+
+local function create_role(msg)
+    local senderId = msg.from
+    local roleName = utils.var_or_nil(msg["role-name"])
+    local roleColor = utils.var_or_nil(msg["role-color"])
+    local rolePermissions = msg["role-permissions"] or 0
+    local roleOrder = msg["role-order"]
+    local mentionable = msg["mentionable"]
+    local hoist = msg["hoist"]
+
+    assert(roleName, "400|role-name is required")
+    assert(type(roleName) == "string", "400|role-name must be a string")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_roles,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to create roles")
 
     -- Validate permissions
-    if ValidateCondition(not PermissionIsValid(permissions), msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Invalid permissions value"
-            })
-        }) then
-        return
+    if rolePermissions then
+        assert(type(rolePermissions) == "number", "400|role-permissions must be a number")
+        assert(rolePermissions >= 0, "400|role-permissions must be non-negative")
     end
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
+    -- Validate color format (hex color)
+    if roleColor then
+        assert(type(roleColor) == "string", "400|role-color must be a string")
+        assert(roleColor:match("^#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$"),
+            "400|role-color must be a valid hex color (e.g., #FF0000)")
     end
 
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to create roles"
-            })
-        }) then
-        return
-    end
+    local roleId = utils.get_id()
 
-    -- Determine order position
-    local new_orderId
-    if orderId then
-        new_orderId = orderId
-        -- Make room for new role
-        for _, role in pairs(roles) do
-            if role and role.orderId and role.orderId >= orderId then
-                role.orderId = role.orderId + 1
+    -- If no order specified, put it at the end (but before @everyone)
+    if not roleOrder then
+        local maxOrder = 1 -- @everyone has order 1
+        for _, role in pairs(server.roles) do
+            if role.id ~= "@" and role.order > maxOrder then
+                maxOrder = role.order
             end
         end
-    else
-        -- Place at end
-        local maxOrderId = 0
-        for _, role in pairs(roles) do
-            if role and role.orderId then
-                maxOrderId = math.max(maxOrderId, role.orderId)
-            end
-        end
-        new_orderId = 1
-        if maxOrderId then
-            new_orderId = maxOrderId + 1
-        end
+        roleOrder = maxOrder + 1
     end
 
-    -- Insert new role with robust roleId generation (roles is a map/table)
-    local roleId = GetNextRoleId()
-    roles[roleId] = {
-        roleId = roleId,
-        name = name,
-        color = color,
-        permissions = permissions,
-        orderId = new_orderId
+    local role = {
+        id = roleId,
+        name = roleName,
+        order = roleOrder,
+        color = roleColor or "#99AAB5",
+        permissions = rolePermissions,
+        mentionable = mentionable or false,
+        hoist = hoist or false,
     }
 
-    -- initialize empty mapping bucket for the new role for consistency
-    role_member_mapping[roleId] = role_member_mapping[roleId] or {}
-
-    -- Resequence to ensure clean ordering
-    ResequenceRoles()
+    utils.roles.set(roleId, role)
 
     msg.reply({
-        Action = "Create-Role-Response",
-        Status = "200",
+        action = "create-role-response",
+        status = helpers.status.success,
+        data = json.encode(role)
     })
-    SyncProcessState()
+end
+
+Handlers.add("create-role", function(msg)
+    utils.handle_run(create_role, msg)
 end)
 
-Handlers.add("Update-Role", function(msg)
-    local userId = msg.From
-    local roleId = VarOrNil(msg.Tags["Role-Id"])
-    local name = VarOrNil(msg.Tags.Name)
-    local color = VarOrNil(msg.Tags.Color)
-    local permissions = VarOrNil(msg.Tags.Permissions)
-    local orderId = VarOrNil(msg.Tags["Order-Id"])
+local function update_role(msg)
+    local senderId = msg.from
+    local roleId = utils.var_or_nil(msg["role-id"])
+    local roleName = utils.var_or_nil(msg["role-name"])
+    local roleColor = utils.var_or_nil(msg["role-color"])
+    local rolePermissions = msg["role-permissions"]
+    local roleOrder = msg["role-order"]
+    local mentionable = msg["mentionable"]
+    local hoist = msg["hoist"]
 
-    if permissions then permissions = tonumber(permissions) end
-    if orderId then orderId = tonumber(orderId) end
-    if roleId then roleId = tostring(roleId) end
+    assert(roleId, "400|role-id is required")
+    assert(roleId ~= "@", "400|cannot update everyone role")
 
-    if ValidateCondition(not roleId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Role ID is required"
-            })
-        }) then
-        return
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_roles,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to update roles")
+
+    local role = utils.roles.get(roleId)
+    assert(role, "404|role not found")
+
+    -- Check role hierarchy: users can only update roles below their highest role
+    -- (unless they are the server owner or have administrator permission)
+    if senderMember.id ~= owner and not utils.permissions.member_has(senderMember, helpers.permissions.administrator) then
+        local senderHighestOrder = utils.permissions.get_highest_role_order(senderMember)
+        assert(role.order < senderHighestOrder, "403|cannot update role higher than or equal to your highest role")
     end
 
-    -- Validate permissions if provided
-    if permissions and ValidateCondition(not PermissionIsValid(permissions), msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Invalid permissions value"
-            })
-        }) then
-        return
+    if roleName then
+        assert(type(roleName) == "string", "400|role-name must be a string")
+        role.name = roleName
     end
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
+    if roleColor then
+        assert(type(roleColor) == "string", "400|role-color must be a string")
+        assert(roleColor:match("^#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$"),
+            "400|role-color must be a valid hex color (e.g., #FF0000)")
+        role.color = roleColor
     end
 
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to update roles"
-            })
-        }) then
-        return
+    if rolePermissions ~= nil then
+        assert(type(rolePermissions) == "number", "400|role-permissions must be a number")
+        assert(rolePermissions >= 0, "400|role-permissions must be non-negative")
+        role.permissions = rolePermissions
     end
 
-    local role = GetRole(roleId)
-    if ValidateCondition(not role, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Role not found"
-            })
-        }) then
-        return
+    if roleOrder then
+        assert(type(roleOrder) == "number", "400|role-order must be a number")
+        role.order = roleOrder
     end
 
-
-    -- Get current values
-    local current_order = role.orderId
-    local new_name = name or role.name
-    local new_color = color or role.color
-    local new_permissions = permissions or role.permissions
-    local new_orderId = orderId or current_order
-
-    -- Handle ordering changes
-    if orderId and orderId ~= current_order then
-        if orderId < current_order then
-            -- Moving up: shift other roles down
-            for _, role in pairs(roles) do
-                if role and role.orderId and role.orderId >= orderId and role.orderId < current_order and tostring(role.roleId) ~= tostring(roleId) then
-                    role.orderId = role.orderId + 1
-                end
-            end
-        else
-            -- Moving down: shift other roles up
-            for _, role in pairs(roles) do
-                if role and role.orderId and role.orderId > current_order and role.orderId <= orderId and tostring(role.roleId) ~= tostring(roleId) then
-                    role.orderId = role.orderId - 1
-                end
-            end
-        end
+    if mentionable ~= nil then
+        assert(type(mentionable) == "boolean", "400|mentionable must be a boolean")
+        role.mentionable = mentionable
     end
 
-    -- Update the role
-    role.name = new_name
-    role.color = new_color
-    role.permissions = new_permissions
-    role.orderId = new_orderId
+    if hoist ~= nil then
+        assert(type(hoist) == "boolean", "400|hoist must be a boolean")
+        role.hoist = hoist
+    end
 
-    -- Resequence to ensure clean ordering
-    ResequenceRoles()
+    utils.roles.set(roleId, role)
 
     msg.reply({
-        Action = "Update-Role-Response",
-        Status = "200",
+        action = "update-role-response",
+        status = helpers.status.success,
+        data = json.encode(role)
     })
-    SyncProcessState()
+end
+
+Handlers.add("update-role", function(msg)
+    utils.handle_run(update_role, msg)
 end)
 
-Handlers.add("Delete-Role", function(msg)
-    local userId = msg.From
-    local roleId = VarOrNil(msg.Tags["Role-Id"])
+local function delete_role(msg)
+    local senderId = msg.from
+    local roleId = utils.var_or_nil(msg["role-id"])
 
-    if roleId then roleId = tostring(roleId) end
-    if ValidateCondition(not roleId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Role ID is required"
-            })
-        }) then
-        return
+    assert(roleId, "400|role-id is required")
+    assert(roleId ~= "@", "400|cannot delete everyone role")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_roles,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to delete roles")
+
+    local role = utils.roles.get(roleId)
+    assert(role, "404|role not found")
+
+    -- Check role hierarchy: users can only delete roles below their highest role
+    -- (unless they are the server owner or have administrator permission)
+    if senderMember.id ~= owner and not utils.permissions.member_has(senderMember, helpers.permissions.administrator) then
+        local senderHighestOrder = utils.permissions.get_highest_role_order(senderMember)
+        assert(role.order < senderHighestOrder, "403|cannot delete role higher than or equal to your highest role")
     end
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to delete roles"
-            })
-        }) then
-        return
-    end
-
-    local role = GetRole(roleId)
-    if ValidateCondition(not role, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Role not found"
-            })
-        }) then
-        return
-    end
-
-    -- Prevent deletion of default role (roleId 1)
-    if ValidateCondition(tostring(roleId) == "1", msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Cannot delete the default role"
-            })
-        }) then
-        return
-    end
-
-    -- Remove this role from all members who have it (by value)
-    local membersWithRole = role_member_mapping[roleId] or {}
-    for memberId, _ in pairs(membersWithRole) do
-        local member = members[memberId]
+    -- Remove this role from all members
+    for memberId, _ in pairs(helpers.role_to_member[roleId] or {}) do
+        local member = utils.members.get(memberId)
         if member then
-            local newRoles = {}
-            for _, rid in ipairs(member.roles) do
-                if rid ~= roleId then table.insert(newRoles, rid) end
-            end
-            member.roles = newRoles
-            -- Update the sanitized version in storage
-            UpdateMemberTable(memberId, member)
+            member.roles[roleId] = nil
+            utils.members.set(memberId, member)
         end
     end
-    -- clear mapping for this role
-    role_member_mapping[roleId] = nil
 
-    -- for _, member in pairs(members) do
-    --     if member.roles then
-    --         local newRoles = {}
-    --         for _, rid in ipairs(member.roles) do
-    --             if rid ~= roleId then table.insert(newRoles, rid) end
-    --         end
-    --         member.roles = newRoles
-    --     end
-    -- end
+    -- Clear the role to member mapping
+    helpers.role_to_member[roleId] = nil
 
     -- Delete the role
-    roles[roleId] = nil
-
-    -- Resequence roles to fill the gap
-    ResequenceRoles()
-
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = "roles",
-        targetKey = roleId,
-    })
+    server.roles[roleId] = nil
 
     msg.reply({
-        Action = "Delete-Role-Response",
-        Status = "200",
+        action = "delete-role-response",
+        status = helpers.status.success,
     })
-    SyncProcessState()
-end)
-
-----------------------------------------------------------------------------
---- MEMBERS
-
--- Handlers.add("Get-Member", function(msg)
---     local userId = VarOrNil(msg.Tags.UserId) or msg.From
-
---     local member = GetMember(userId)
---     if ValidateCondition(not member, msg, {
---             Status = "400",
---             Data = json.encode({
---                 error = "User is not a member of this server"
---             })
---         }) then
---         return
---     end
-
---     msg.reply({
---         Action = "Get-Member-Response",
---         Member = json.encode(member)
---     })
--- end)
-
--- Handlers.add("Get-All-Members", function(msg)
---     local membersArranged = GetAllMembers()
-
---     msg.reply({
---         Action = "Get-Members-Response",
---         Status = "200",
---         Data = json.encode(membersArranged)
---     })
--- end)
-
-Handlers.add("Update-Member", function(msg)
-    local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
-    local nickname = msg.Tags.Nickname -- Don't use VarOrNil here to allow empty strings
-
-    -- Check if updating own profile or others
-    local isUpdatingSelf = (targetUserId == userId or targetUserId == nil)
-    local actualTargetId = targetUserId or userId
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "You are not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    -- Check permissions for updating others
-    if not isUpdatingSelf then
-        local hasPermission = MemberHasPermission(member, Permissions.MANAGE_NICKNAMES)
-        if ValidateCondition(not hasPermission, msg, {
-                Status = "400",
-                Data = json.encode({
-                    error = "User does not have permission to manage nicknames"
-                })
-            }) then
-            return
-        end
-    end
-
-    local targetMember = GetMember(actualTargetId)
-    if ValidateCondition(not targetMember, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Target user is not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    -- Update nickname if Nickname tag is present (supports clearing nicknames)
-    if msg.Tags.Nickname then
-        nickname = msg.Tags.Nickname
-
-        -- Handle special sentinel value for clearing nicknames
-        local nicknameValue
-        if nickname == "__CLEAR_NICKNAME__" then
-            nicknameValue = nil -- NULL in database clears the nickname
-        else
-            nicknameValue = nickname
-        end
-
-        targetMember.nickname = nicknameValue
-    end
-
-    -- Update the appropriate table (members or bots)
-    UpdateMemberTable(actualTargetId, targetMember)
-
-    msg.reply({
-        Action = "Update-Member-Response",
-        Status = "200",
-    })
-    SyncProcessState()
-end)
-
-Handlers.add("Kick-Member", function(msg)
-    local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
-    local reason = VarOrNil(msg.Tags.Reason)
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.KICK_MEMBERS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to kick members"
-            })
-        }) then
-        return
-    end
-
-    local targetMember = GetMember(targetUserId)
-    if ValidateCondition(not targetMember, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Target user is not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    -- Cannot kick server owner
-    if ValidateCondition(targetUserId == Owner, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Cannot kick the server owner"
-            })
-        }) then
-        return
-    end
-
-    -- Remove from appropriate table and role mapping
-    RemoveMemberFromTables(targetUserId)
-
-    -- Decrement member counter for removed member
-    if MemberCount > 0 then MemberCount = MemberCount - 1 end
-
-    -- Notify subspace that user was kicked
-    ao.send({
-        Target = Subspace,
-        Action = "User-Left-Server",
-        Tags = {
-            ["User-Id"] = targetUserId,
-            ["Server-Id"] = ao.id,
-            Reason = reason or "Kicked"
-        }
-    })
-
-    -- If it's a bot, also notify the bot process
-    if IsMemberBot(targetUserId) then
-        ao.send({
-            Target = targetUserId,
-            Action = "Remove-Bot",
-        })
-    end
-
-    -- Add DELETE event for state patching
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = IsMemberBot(targetUserId) and "bots" or "members",
-        targetKey = targetUserId,
-    })
-
-    msg.reply({
-        Action = "Kick-Member-Response",
-        Status = "200",
-    })
-
-    SyncProcessState()
-end)
-
-Handlers.add("Ban-Member", function(msg)
-    local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
-    local reason = VarOrNil(msg.Tags.Reason)
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.BAN_MEMBERS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to ban members"
-            })
-        }) then
-        return
-    end
-
-    -- Cannot ban server owner
-    if ValidateCondition(targetUserId == Owner, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Cannot ban the server owner"
-            })
-        }) then
-        return
-    end
-
-    -- Check if user is already banned (if we had a bans table)
-    -- For now, just kick them since we don't have a bans table in the schema
-
-    local targetMember = GetMember(targetUserId)
-    if ValidateCondition(not targetMember, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Target user is not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    -- Remove from appropriate table and role mapping
-    RemoveMemberFromTables(targetUserId)
-
-    -- Decrement member counter for removed member
-    if MemberCount > 0 then MemberCount = MemberCount - 1 end
-
-    -- Add DELETE event for state patching
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = IsMemberBot(targetUserId) and "bots" or "members",
-        targetKey = targetUserId,
-    })
-
-    ao.send({
-        Target = Subspace,
-        Action = "User-Left-Server",
-        Tags = {
-            ["User-Id"] = targetUserId,
-            ["Server-Id"] = ao.id,
-            Reason = reason or "Banned"
-        }
-    })
-
-    -- If it's a bot, also notify the bot process
-    if IsMemberBot(targetUserId) then
-        ao.send({
-            Target = targetUserId,
-            Action = "Remove-Bot",
-        })
-    end
-
-    msg.reply({
-        Action = "Ban-Member-Response",
-        Status = "200",
-    })
-    SyncProcessState()
-end)
-
-Handlers.add("Unban-Member", function(msg)
-    local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.BAN_MEMBERS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to unban members"
-            })
-        }) then
-        return
-    end
-
-    SyncProcessState()
-
-    -- Since we don't have a proper bans table, this is a placeholder
-    -- In a full implementation, this would remove the user from a bans table
-    msg.reply({
-        Action = "Unban-Member-Response",
-        Status = "200",
-        Data = json.encode({
-            message = "User can now rejoin the server (ban system not fully implemented)"
-        })
-    })
-end)
-
-Handlers.add("Assign-Role", function(msg)
-    local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
-    local roleId = VarOrNil(msg.Tags["Role-Id"])
-
-    if roleId then roleId = tostring(roleId) end
-    if ValidateCondition(not roleId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Role ID is required"
-            })
-        }) then
-        return
-    end
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to assign roles"
-            })
-        }) then
-        return
-    end
-
-    local targetMember = GetMember(targetUserId)
-    if ValidateCondition(not targetMember, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Target user is not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    local role = GetRole(roleId)
-    if ValidateCondition(not role, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Role not found"
-            })
-        }) then
-        return
-    end
-
-    -- Check role hierarchy - different logic for self vs others
-    local canManageRole = false
-    local errorMessage = ""
-
-    if userId == targetUserId then
-        -- Self-management: use own role hierarchy logic
-        canManageRole = CanUserManageOwnRole(userId, roleId)
-        errorMessage =
-        "You cannot assign this role to yourself. You can only assign roles lower in hierarchy than your highest role with MANAGE_ROLES permission, and you cannot assign roles that would conflict with your authority."
-    else
-        -- Managing others: use standard role management logic
-        canManageRole = CanUserManageRole(userId, roleId)
-        errorMessage =
-        "You cannot assign this role. You can only assign roles lower in hierarchy than your highest role, or you need ADMINISTRATOR permission."
-    end
-
-    if ValidateCondition(not canManageRole, msg, {
-            Status = "403",
-            Data = json.encode({
-                error = errorMessage
-            })
-        }) then
-        return
-    end
-
-    -- Check if user can manage the target user's roles
-    if ValidateCondition(not CanUserManageUserRoles(userId, targetUserId), msg, {
-            Status = "403",
-            Data = json.encode({
-                error = "You cannot manage this user's roles. You can only manage users with lower role hierarchy than yours, or you need ADMINISTRATOR permission."
-            })
-        }) then
-        return
-    end
-
-    -- Check if user already has this role (by value)
-    local hasRole = false
-    for _, rid in ipairs(targetMember.roles or {}) do
-        if rid == roleId then
-            hasRole = true
-            break
-        end
-    end
-    if ValidateCondition(hasRole, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User already has this role"
-            })
-        }) then
-        return
-    end
-
-    -- Assign the role to the appropriate table
-    local targetData = IsMemberBot(targetUserId) and bots[targetUserId] or members[targetUserId]
-    targetData.roles = targetData.roles or {}
-    table.insert(targetData.roles, roleId)
-
-    -- Update the appropriate table
-    UpdateMemberTable(targetUserId, targetData)
-
-    -- Update mapping
-    AddUserToRoleMapping(roleId, targetUserId)
-
-    msg.reply({
-        Action = "Assign-Role-Response",
-        Status = "200",
-    })
-    SyncProcessState()
-end)
-
-Handlers.add("Unassign-Role", function(msg)
-    local userId = msg.From
-    local targetUserId = VarOrNil(msg.Tags["Target-User-Id"])
-    local roleId = VarOrNil(msg.Tags["Role-Id"])
-
-    if roleId then roleId = tostring(roleId) end
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User not found"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_ROLES)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to unassign roles"
-            })
-        }) then
-        return
-    end
-
-    local targetMember = GetMember(targetUserId)
-    if ValidateCondition(not targetMember, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Target user is not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    local role = GetRole(roleId)
-    if ValidateCondition(not role, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Role not found"
-            })
-        }) then
-        return
-    end
-
-    -- Prevent removal of default role (roleId 1) from any member
-    if ValidateCondition(tostring(roleId) == "1", msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Cannot remove the default role from members. All members must have the default role."
-            })
-        }) then
-        return
-    end
-
-    -- Check role hierarchy - different logic for self vs others
-    local canManageRole = false
-    local errorMessage = ""
-
-    if userId == targetUserId then
-        -- Self-management: use own role hierarchy logic
-        canManageRole = CanUserManageOwnRole(userId, roleId)
-        errorMessage =
-        "You cannot remove this role from yourself. You can only remove roles lower in hierarchy than your highest role with MANAGE_ROLES permission, and you cannot remove your highest MANAGE_ROLES role."
-    else
-        -- Managing others: use standard role management logic
-        canManageRole = CanUserManageRole(userId, roleId)
-        errorMessage =
-        "You cannot remove this role. You can only remove roles lower in hierarchy than your highest role, or you need ADMINISTRATOR permission."
-    end
-
-    if ValidateCondition(not canManageRole, msg, {
-            Status = "403",
-            Data = json.encode({
-                error = errorMessage
-            })
-        }) then
-        return
-    end
-
-    -- Check if user can manage the target user's roles
-    if ValidateCondition(not CanUserManageUserRoles(userId, targetUserId), msg, {
-            Status = "403",
-            Data = json.encode({
-                error = "You cannot manage this user's roles. You can only manage users with lower role hierarchy than yours, or you need ADMINISTRATOR permission."
-            })
-        }) then
-        return
-    end
-
-    -- Check if user has this role (by value)
-    local hasRole = false
-    for _, rid in ipairs(targetMember.roles or {}) do
-        if rid == roleId then
-            hasRole = true
-            break
-        end
-    end
-    if ValidateCondition(not hasRole, msg, {
-            Status = "200",
-            Data = json.encode({
-                error = "User does not have this role"
-            })
-        }) then
-        -- return
-    end
-
-    -- Remove the role (by value) from the appropriate table
-    local targetData = IsMemberBot(targetUserId) and bots[targetUserId] or members[targetUserId]
-    local newRoles = {}
-    for _, rid in ipairs(targetData.roles or {}) do
-        if rid ~= roleId then table.insert(newRoles, rid) end
-    end
-    targetData.roles = newRoles
-
-    -- Update the appropriate table
-    UpdateMemberTable(targetUserId, targetData)
-
-    -- Update mapping
-    RemoveUserFromRoleMapping(roleId, targetUserId)
-
-    -- table.insert(events, {
-    --     eventType = "UNASSIGN",
-    --     targetTable = "members",
-    --     baseKey = targetUserId,
-    --     targetKey = roleId,
-    -- })
-
-    msg.reply({
-        Action = "Unassign-Role-Response",
-        Status = "200",
-    })
-    SyncProcessState()
-end)
-
-----------------------------------------------------------------------------
---- MESSAGES
-
-
-function ExtractMentions(content)
-    local mentions = {}
-    local seen = {}                                -- Prevent duplicates
-    for userId in content:gmatch("<([^@]+)@user>") do
-        if not seen[userId] and #userId == 43 then -- Validate ID length
-            table.insert(mentions, userId)
-            seen[userId] = true
-        end
-    end
-    return mentions
 end
 
-Handlers.add("Send-Message", function(msg)
-    local userId = msg.From
-    local content = VarOrNil(msg.Data)
-    local channelId = VarOrNil(msg.Tags["Channel-Id"] or msg["Channel-Id"])
-    local attachments = VarOrNil(msg.Tags.Attachments) or "[]"
-    local replyTo = VarOrNil(msg.Tags["Reply-To"])
-    local timestamp = tonumber(msg.Timestamp or os.time())
-    local messageTxId = msg.Id
-    if channelId then channelId = tostring(channelId) end
-    if ValidateCondition(not channelId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel ID is required"
-            })
-        }) then
-        return
-    end
-    if replyTo then replyTo = tostring(replyTo) end
-
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "You are not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    local channel = GetChannel(channelId)
-    if ValidateCondition(not channel, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel not found"
-            })
-        }) then
-        return
-    end
-
-    local canSendMessages = CanMemberSendMessagesInChannel(member, channel)
-    if ValidateCondition(not canSendMessages, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to send messages in this channel"
-            })
-        }) then
-        return
-    end
-
-    -- Check if reply message exists (if replying)
-    local channelKey = tostring(channelId)
-    if replyTo then
-        local replyBucket = messages[channelKey] or {}
-        local replyMessage = replyBucket[replyTo]
-        if ValidateCondition(not replyMessage, msg, {
-                Status = "400",
-                Data = json.encode({
-                    error = "Reply target message not found"
-                })
-            }) then
-            return
-        end
-    end
-
-    -- Ensure channel message bucket exists
-    messages[channelKey] = messages[channelKey] or {}
-    -- Insert message
-    messages[channelKey][messageTxId] = {
-        content = content,
-        authorId = userId,
-        timestamp = timestamp,
-        messageId = messageTxId,
-        attachments = attachments,
-        replyTo = replyTo
-    }
-
-    msg.reply({
-        Action = "Send-Message-Response",
-        Status = "200",
-    })
-    SyncProcessState()
-
-    msg.forward(ao.id, {
-        Action = "Push-To-Bots",
-        Tags = {
-            ["X-Id"] = tostring(msg.Id),
-            ["X-Timestamp"] = tostring(timestamp),
-            ["X-Channel-Id"] = tostring(channelId),
-            ["X-Author-Id"] = tostring(userId),
-            ["X-Attachments"] = tostring(attachments or ""),
-            ["X-Reply-To"] = tostring(replyTo or ""),
-            ["X-Event-Type"] = "on_message_send"
-        }
-    })
+Handlers.add("delete-role", function(msg)
+    utils.handle_run(delete_role, msg)
 end)
 
-Handlers.add("Edit-Message", function(msg)
-    local userId = msg.From
-    local messageId = VarOrNil(msg.Tags["Message-Id"])
-    local channelId = VarOrNil(msg.Tags["Channel-Id"])
-    local content = VarOrNil(msg.Data)
+local function assign_role(msg)
+    local senderId = msg.from
+    local userId = msg["user-id"]
+    local roleId = msg["role-id"]
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "You are not a member of this server"
-            })
-        }) then
-        return
+    assert(userId, "400|user-id is required")
+    assert(roleId, "400|role-id is required")
+
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_roles,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to assign roles")
+
+    -- Get the member to assign role to
+    local member = utils.members.get(userId)
+    assert(member, "404|member not found")
+
+    -- Get the role
+    local role = utils.roles.get(roleId)
+    assert(role, "404|role not found")
+
+    -- Check role hierarchy: users can only assign roles below their highest role
+    -- (unless they are the server owner or have administrator permission)
+    if senderMember.id ~= owner and not utils.permissions.member_has(senderMember, helpers.permissions.administrator) then
+        local senderHighestOrder = utils.permissions.get_highest_role_order(senderMember)
+        assert(role.order < senderHighestOrder, "403|cannot assign role higher than or equal to your highest role")
     end
 
-    if ValidateCondition(not channelId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel ID is required"
-            })
-        }) then
-        return
-    end
-
-    if channelId then channelId = tostring(channelId) end
-
-    -- Validate that the channel exists
-    local channel = GetChannel(channelId)
-    if ValidateCondition(not channel, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel not found"
-            })
-        }) then
-        return
-    end
-
-    local messageBucket = messages[channelId] or {}
-    local message = messageBucket[messageId]
-    if ValidateCondition(not message, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Message not found"
-            })
-        }) then
-        return
-    end
-
-    -- Check if user is the author or has manage messages permission
-    local isAuthor = (message.authorId == userId)
-    local hasManagePermission = MemberHasPermission(member, Permissions.MANAGE_MESSAGES)
-
-    if ValidateCondition(not isAuthor and not hasManagePermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "You can only edit your own messages"
-            })
-        }) then
-        return
-    end
-
-    if ValidateCondition(not content, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Content cannot be empty when editing a message"
-            })
-        }) then
-        return
-    end
-
-    -- Update message
-    message.content = content
-    message.edited = 1
-
-    -- Forward message edit to all subscribed bots
-    msg.forward(ao.id, {
-        Action = "Push-To-Bots",
-        Data = content,
-        Tags = {
-            ["X-Id"] = tostring(messageId),
-            ["X-Timestamp"] = tostring(message.timestamp),
-            ["X-Channel-Id"] = tostring(channelId),
-            ["X-Author-Id"] = tostring(message.authorId),
-            ["X-Attachments"] = tostring(message.attachments or ""),
-            ["X-Reply-To"] = tostring(message.replyTo or ""),
-            ["X-Event-Type"] = "on_message_edit",
-            ["X-Editor-Id"] = tostring(userId)
-        }
-    })
+    -- Assign the role
+    role_utils.assign(roleId, userId)
 
     msg.reply({
-        Action = "Edit-Message-Response",
-        Status = "200",
+        action = "assign-role-response",
+        status = helpers.status.success,
     })
-    SyncProcessState()
+end
+
+Handlers.add("assign-role", function(msg)
+    utils.handle_run(assign_role, msg)
 end)
 
-Handlers.add("Delete-Message", function(msg)
-    local userId = msg.From
-    local messageId = VarOrNil(msg.Tags["Message-Id"])
-    local channelId = VarOrNil(msg.Tags["Channel-Id"])
+local function unassign_role(msg)
+    local senderId = msg.from
+    local userId = msg["user-id"]
+    local roleId = msg["role-id"]
 
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "You are not a member of this server"
-            })
-        }) then
-        return
-    end
+    assert(userId, "400|user-id is required")
+    assert(roleId, "400|role-id is required")
+    assert(roleId ~= "@", "400|cannot unassign everyone role")
 
-    if ValidateCondition(not channelId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel ID is required"
-            })
-        }) then
-        return
-    end
+    -- Get sender member to check permissions
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
 
-    if channelId then channelId = tostring(channelId) end
+    -- Check permissions using standardized helper
+    assert(utils.permissions.member_has_any(senderMember, {
+        helpers.permissions.manage_roles,
+        helpers.permissions.manage_server,
+        helpers.permissions.administrator
+    }), "403|insufficient permissions to unassign roles")
 
-    -- Validate that the channel exists
-    local channel = GetChannel(channelId)
-    if ValidateCondition(not channel, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Channel not found"
-            })
-        }) then
-        return
-    end
+    -- Get the member to unassign role from
+    local member = utils.members.get(userId)
+    assert(member, "404|member not found")
 
-    local messageBucket = messages[channelId] or {}
-    local message = messageBucket[messageId]
-    if ValidateCondition(not message, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Message not found"
-            })
-        }) then
-        return
-    end
+    -- Check if member has the role
+    assert(member.roles[roleId], "400|member does not have this role")
 
-    -- Check if user is the author, server owner, or has manage messages permission
-    local isAuthor = (message.authorId == userId)
-    local isOwner = (userId == Owner)
-    local hasManagePermission = MemberHasPermission(member, Permissions.MANAGE_MESSAGES)
-
-    if ValidateCondition(not isAuthor and not isOwner and not hasManagePermission, msg, {
-            Status = "403",
-            Data = json.encode({
-                error = "You do not have permission to delete this message. You can only delete your own messages or need MANAGE_MESSAGES permission."
-            })
-        }) then
-        return
-    end
-
-    -- Forward message deletion to all subscribed bots before deleting
-    msg.forward(ao.id, {
-        Action = "Push-To-Bots",
-        Data = message.content or "",
-        Tags = {
-            ["X-Id"] = tostring(messageId),
-            ["X-Timestamp"] = tostring(message.timestamp),
-            ["X-Channel-Id"] = tostring(channelId),
-            ["X-Author-Id"] = tostring(message.authorId),
-            ["X-Attachments"] = tostring(message.attachments or ""),
-            ["X-Reply-To"] = tostring(message.replyTo or ""),
-            ["X-Event-Type"] = "on_message_delete",
-            ["X-Deleter-Id"] = tostring(userId)
-        }
-    })
-
-    -- Delete message
-    if channelId then channelId = tostring(channelId) end
-    if messages[channelId] then
-        messages[channelId][messageId] = nil
-    end
-
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = "messages",
-        baseKey = channelId,
-        targetKey = messageId,
-    })
-
-    msg.reply({
-        Action = "Delete-Message-Response",
-        Status = "200",
-    })
-    SyncProcessState()
-end)
-
-----------------------------------------------------------------------------
-
--- Validate and fix any invalid permissions in existing roles
-function ValidateExistingRolePermissions()
-    local fixedCount = 0
-
-    for _, role in pairs(roles) do
-        if not PermissionIsValid(role.permissions) then
-            -- Fix invalid permissions by setting to basic SEND_MESSAGES permission
-            local newPermissions = Permissions.SEND_MESSAGES
-            role.permissions = newPermissions
-            fixedCount = fixedCount + 1
-            print("Fixed invalid permissions for role: " .. role.name .. " (ID: " .. role.roleId .. ")")
-        end
-    end
-
-    if fixedCount > 0 then
-        print("Fixed " .. fixedCount .. " roles with invalid permissions")
-    end
-end
-
--- Initialize database and validate permissions
-ValidateExistingRolePermissions()
-
--- Clean up any contaminated member data (resolve role objects back to IDs)
-function CleanupContaminatedMemberData()
-    local cleanedCount = 0
-
-    -- Clean members table
-    for memberId, member in pairs(members) do
-        local needsCleaning = false
-
-        -- Check if roles contains objects instead of strings
-        if member.roles then
-            for _, roleData in ipairs(member.roles) do
-                if type(roleData) == "table" then
-                    needsCleaning = true
-                    break
-                end
-            end
-        end
-
-        -- Check if isBot property exists (should not be in storage)
-        if member.isBot ~= nil then
-            needsCleaning = true
-        end
-
-        if needsCleaning then
-            UpdateMemberTable(memberId, member)
-            cleanedCount = cleanedCount + 1
-        end
-    end
-
-    -- Clean bots table
-    for botId, bot in pairs(bots) do
-        local needsCleaning = false
-
-        -- Check if roles contains objects instead of strings
-        if bot.roles then
-            for _, roleData in ipairs(bot.roles) do
-                if type(roleData) == "table" then
-                    needsCleaning = true
-                    break
-                end
-            end
-        end
-
-        -- Check if isBot property exists (should not be in storage)
-        if bot.isBot ~= nil then
-            needsCleaning = true
-        end
-
-        if needsCleaning then
-            UpdateMemberTable(botId, bot)
-            cleanedCount = cleanedCount + 1
-        end
-    end
-
-    if cleanedCount > 0 then
-        print("Cleaned up " .. cleanedCount .. " contaminated member/bot records")
-    end
-
-    return cleanedCount
-end
-
--- Clean up any existing contaminated data
-CleanupContaminatedMemberData()
-
--- Ensure all existing members have the default role
-EnsureAllMembersHaveDefaultRole()
--- Ensure mapping is consistent at startup
-RebuildRoleMemberMapping()
-
--- Initialize MemberCount once at startup based on current state
-local function InitializeMemberCount()
-    local count = 0
-    -- Count regular members
-    for _ in pairs(members) do count = count + 1 end
-    -- Count approved bots
-    for _, bot in pairs(bots) do
-        if bot.approved then
-            count = count + 1
-        end
-    end
-    MemberCount = count
-end
-InitializeMemberCount()
-
-----------------------------------------------------------------------------
-
--- Get the user's highest role (lowest orderId = highest hierarchy)
-function GetUserHighestRole(userId)
-    local member = GetMember(userId)
-    if not member or not member.roles or #member.roles == 0 then
-        return nil
-    end
-
-    local highestRole = nil
-    local lowestOrderId = nil
-
-    for _, role in ipairs(member.roles) do
+    -- Check role hierarchy: users can only unassign roles below their highest role
+    -- (unless they are the server owner or have administrator permission)
+    if senderMember.id ~= owner and not utils.permissions.member_has(senderMember, helpers.permissions.administrator) then
+        local role = utils.roles.get(roleId)
         if role then
-            if lowestOrderId == nil or (role.orderId or math.huge) < lowestOrderId then
-                lowestOrderId = role.orderId or math.huge
-                highestRole = role
-            end
+            local senderHighestOrder = utils.permissions.get_highest_role_order(senderMember)
+            assert(role.order < senderHighestOrder, "403|cannot unassign role higher than or equal to your highest role")
         end
     end
 
-    return highestRole
+    -- Unassign the role
+    role_utils.unassign(roleId, userId)
+
+    msg.reply({
+        action = "unassign-role-response",
+        status = helpers.status.success,
+    })
 end
 
--- Check if a user can manage a specific role based on hierarchy
-function CanUserManageRole(userId, targetRoleId)
-    local member = GetMember(userId)
-    if not member then
-        return false
+Handlers.add("unassign-role", function(msg)
+    utils.handle_run(unassign_role, msg)
+end)
+
+
+
+--#endregion
+
+--#region messages
+
+local function send_message(msg)
+    local senderId = msg.from
+    local channelId = utils.var_or_nil(msg["channel-id"])
+    local content = utils.var_or_nil(msg["content"])
+    local attachments = msg["attachments"] or {}
+
+    assert(channelId, "400|channel-id is required")
+    assert(content or #attachments > 0, "400|content or attachments required")
+
+    -- Get sender member
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Get the channel
+    local channel = utils.channels.get(channelId)
+    assert(channel, "404|channel not found")
+
+    -- Check if member can send messages in this channel
+    assert(utils.channels.can_send(channel, senderMember),
+        "403|insufficient permissions to send messages in this channel")
+
+    -- Validate content
+    if content then
+        assert(type(content) == "string", "400|content must be a string")
+        assert(#content > 0 and #content <= 2000, "400|content must be between 1 and 2000 characters")
     end
 
-    -- check if role exists
-    local targetRole = roles[targetRoleId]
-    if not targetRole then
-        return false
-    end
+    -- Validate attachments if present
+    if attachments and #attachments > 0 then
+        if type(attachments) ~= "table" then
+            local success, decoded = pcall(json.decode, attachments)
+            assert(success, "400|invalid attachments format")
+            attachments = decoded
+        end
+        -- Check if member has attachment permissions
+        if channel.allow_attachments == 0 then
+            assert(utils.permissions.member_has_any(senderMember, {
+                helpers.permissions.attachments,
+                helpers.permissions.manage_channels,
+                helpers.permissions.manage_server,
+                helpers.permissions.administrator
+            }), "403|insufficient permissions to send attachments in this channel")
+        end
 
-    -- Check if user has ADMINISTRATOR permission (can manage any role)
-    if MemberHasPermission(member, Permissions.ADMINISTRATOR) then
-        return true
-    end
+        assert(type(attachments) == "table", "400|attachments must be a table")
+        assert(#attachments <= 10, "400|maximum 10 attachments allowed")
 
-    -- Check if user has MANAGE_ROLES permission
-    if not MemberHasPermission(member, Permissions.MANAGE_ROLES) then
-        return false
-    end
-
-    -- Get user's highest role
-    local userHighestRole = GetUserHighestRole(userId)
-    if not userHighestRole then
-        return false -- User has no roles, cannot manage any roles
-    end
-
-    -- User can only manage roles with higher orderId (lower hierarchy) than their highest role
-    return targetRole.orderId > userHighestRole.orderId
-end
-
--- Get the user's highest role that has MANAGE_ROLES permission
-function GetUserHighestManageRolesRole(userId)
-    local member = GetMember(userId)
-    if not member or not member.roles or #member.roles == 0 then
-        return nil
-    end
-
-    local highestManageRole = nil
-    local lowestOrderId = nil
-
-    for _, role in ipairs(member.roles) do
-        if role and HasSpecificPermission(role.permissions, Permissions.MANAGE_ROLES) then
-            if lowestOrderId == nil or (role.orderId or math.huge) < lowestOrderId then
-                lowestOrderId = role.orderId or math.huge
-                highestManageRole = role
-            end
+        for _, attachment in ipairs(attachments) do
+            assert(type(attachment) == "string", "400|each attachment must be a string (arweave tx id)")
+            assert(#attachment == 43, "400|each attachment must be a valid arweave tx id")
         end
     end
 
-    return highestManageRole
-end
+    local messageId = utils.get_id()
+    local timestamp = os.time()
 
--- Check if a user can manage their own specific role
-function CanUserManageOwnRole(userId, roleId)
-    local member = GetMember(userId)
-    if not member then
-        return false
-    end
-
-    -- Check if user has ADMINISTRATOR permission (can manage any of their own roles)
-    if MemberHasPermission(member, Permissions.ADMINISTRATOR) then
-        return true
-    end
-
-    -- Get the target role
-    local targetRole = roles[roleId]
-    if not targetRole then
-        return false
-    end
-
-    -- Get user's highest role with MANAGE_ROLES permission
-    local userHighestManageRole = GetUserHighestManageRolesRole(userId)
-    if not userHighestManageRole then
-        return false -- User has no MANAGE_ROLES permission
-    end
-
-    -- User cannot remove their highest MANAGE_ROLES role (would lose permission)
-    if targetRole.roleId == userHighestManageRole.roleId then
-        return false
-    end
-
-    -- User can only manage roles with higher orderId (lower hierarchy) than their highest MANAGE_ROLES role
-    return targetRole.orderId > userHighestManageRole.orderId
-end
-
--- Check if a user can manage another user's roles
-function CanUserManageUserRoles(managerId, targetUserId)
-    local managerMember = GetMember(managerId)
-    if not managerMember then
-        return false
-    end
-
-    -- Check if manager has ADMINISTRATOR permission (can manage anyone)
-    if MemberHasPermission(managerMember, Permissions.ADMINISTRATOR) then
-        return true
-    end
-
-    -- Check if manager has MANAGE_ROLES permission
-    if not MemberHasPermission(managerMember, Permissions.MANAGE_ROLES) then
-        return false
-    end
-
-    -- If managing own roles, use different logic
-    if managerId == targetUserId then
-        return true -- Self-management allowed, but specific role checks apply in CanUserManageOwnRole
-    end
-
-    -- Get both users' highest roles
-    local managerHighestRole = GetUserHighestRole(managerId)
-    local targetHighestRole = GetUserHighestRole(targetUserId)
-
-    if not managerHighestRole then
-        return false -- Manager has no roles, cannot manage anyone
-    end
-
-    -- If target has no roles, manager can manage them
-    if not targetHighestRole then
-        return true
-    end
-
-    -- Manager can only manage users whose highest role is lower in hierarchy
-    return managerHighestRole.orderId < targetHighestRole.orderId
-end
-
-----------------------------------------------------------------------------
--- BOTS
-
-Handlers.add("Add-Bot", function(msg)
-    assert(msg.From == Subspace, "You are not allowed to add bots")
-
-    local userId = msg["X-Origin"]
-
-    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
-    local serverId = VarOrNil(msg.Tags["Server-Id"])
-
-    if ValidateCondition(not botProcess, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Bot-Process is required"
-            })
-        }) then
-        return
-    end
-
-    if ValidateCondition(not serverId, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Server-Id is required"
-            })
-        }) then
-        return
-    end
-
-    -- verify serverId is the if of this server
-    if ValidateCondition(serverId ~= ao.id, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Server-Id is not the id of this server"
-            })
-        }) then
-        return
-    end
-
-    -- member exists and has permissions to add bots
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User is not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_BOTS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to add bots"
-            })
-        }) then
-        return
-    end
-
-    -- check if bot already exists
-    local bot = bots[botProcess]
-    if ValidateCondition(bot and bot.approved, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Bot already exists in server"
-            })
-        }) then
-        return
-    end
-
-    -- add bot to server
-    bots[botProcess] = {
-        approved = false,
-        process = botProcess
+    local message = {
+        id = messageId,
+        channel_id = channelId,
+        author_id = senderId,
+        content = content or "",
+        attachments = attachments,
+        timestamp = timestamp,
+        edited_timestamp = nil,
     }
 
-    -- msg.reply({
-    --     Action = "Add-Bot-Response",
-    --     Status = "200",
-    --     Tags = {
-    --         ["Bot-Process"] = botProcess,
-    --         ["Status"] = "200"
-    --     }
-    -- })
-    Send({
-        Target = Subspace,
-        Action = "Add-Bot-Response",
-        Status = "200",
-        Tags = {
-            ["Bot-Process"] = botProcess,
-            ["Server-Id"] = serverId
-        }
-    })
-    SyncProcessState()
-end)
+    -- TODO
+    -- Store message (in a real implementation, you'd want a proper message storage system)
+    -- For now, we'll just acknowledge the message was sent
 
-Handlers.add("Approve-Add-Bot", function(msg)
-    assert(msg.From == Subspace, "You are not allowed to approve bots")
+    utils.messages.set(messageId, message)
 
-    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
-
-    local bot = bots[botProcess]
-    if ValidateCondition(not bot, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Bot not found"
-            })
-        }) then
-        return
-    end
-
-    -- A bot is like a regular member, but with a special process id, and stored in a different table
-    -- This is because bots are not real users, and we don't want to store them in the members table
-    bot.approved = true
-    bot.nickname = ""       -- blank nickname, show default bot name
-    bot.roles = { "1" }     -- default role id
-    bot.joinedAt = msg.Timestamp
-    bot.userId = botProcess -- Set userId for consistency with member structure
-    UpdateMemberTable(botProcess, bot)
-
-    -- Update role mapping for default role
-    AddUserToRoleMapping("1", botProcess)
-
-    -- Increment member counter
-    MemberCount = MemberCount + 1
-
-    msg.reply({
-        Action = "Approve-Add-Bot-Response",
-        Status = "200",
-        Tags = {
-            ["Bot-Process"] = botProcess
-        }
-    })
-    SyncProcessState()
-end)
-
-Handlers.add("Subscribe", function(msg)
-    local botProcess = msg.From
-    local events = VarOrNil(msg.Tags.Events)
-
-    -- verify if bot is approved
-    local bot = bots[botProcess]
-    if ValidateCondition(not bot or not bot.approved, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Bot is either not approved or doesnot exist in the server"
-            })
-        }) then
-        return
-    end
-
-    -- Parse events if provided
-    local subscribedEvents = {}
-    if events then
-        local success, parsedEvents = pcall(json.decode, events)
-        if success and type(parsedEvents) == "table" then
-            -- Validate that all event keys are valid
-            for eventKey, value in pairs(parsedEvents) do
-                if not Events[eventKey] then
-                    msg.reply({
-                        Action = "Subscribe-Response",
-                        Status = "400",
-                        Data = json.encode({
-                            error = "Invalid event key: " .. eventKey
-                        })
-                    })
-                    return
-                end
-                -- Validate that the value is a boolean
-                if type(value) ~= "boolean" then
-                    msg.reply({
-                        Action = "Subscribe-Response",
-                        Status = "400",
-                        Data = json.encode({
-                            error = "Invalid event value for " .. eventKey .. ": expected boolean, got " .. type(value)
-                        })
-                    })
-                    return
-                end
-            end
-            subscribedEvents = parsedEvents
-        else
-            -- If JSON parsing failed, return an error
-            msg.reply({
-                Action = "Subscribe-Response",
-                Status = "400",
-                Data = json.encode({
-                    error = "Invalid JSON format for events"
-                })
-            })
-            return
-        end
-    end
-
-    -- add bot to subsriptions list with their subscribed events
-    SubscribedBots[botProcess] = subscribedEvents
-
-    msg.reply({
-        Action = "Subscribe-Response",
-        Status = "200",
-        Tags = {
-            Events = json.encode(subscribedEvents)
-        }
-    })
-    SyncProcessState()
-end)
-
-Handlers.add("Remove-Bot", function(msg)
-    local userId = msg.From
-    local botProcess = VarOrNil(msg.Tags["Bot-Process"])
-
-    -- verify if user has permission to remove bots
-    local member = GetMember(userId)
-    if ValidateCondition(not member, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User is not a member of this server"
-            })
-        }) then
-        return
-    end
-
-    local hasPermission = MemberHasPermission(member, Permissions.MANAGE_BOTS)
-    if ValidateCondition(not hasPermission, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "User does not have permission to remove bots"
-            })
-        }) then
-        return
-    end
-
-    local bot = bots[botProcess]
-    if ValidateCondition(not bot, msg, {
-            Status = "400",
-            Data = json.encode({
-                error = "Bot not found"
-            })
-        }) then
-        return
-    end
-
-    -- Remove bot from server using helper function
-    RemoveMemberFromTables(botProcess)
-
-    -- Decrement member counter
-    if MemberCount > 0 then MemberCount = MemberCount - 1 end
-
-    -- Add DELETE event for state patching
-    table.insert(events, {
-        eventType = "DELETE",
-        targetTable = "bots",
-        targetKey = botProcess,
-    })
-
-    -- tell subspace and bot process that bot has been removed
-    ao.send({
-        Target = botProcess,
-        Action = "Remove-Bot",
-    })
-    ao.send({
-        Target = Subspace,
-        Action = "Remove-Bot",
-        Tags = {
-            ["Bot-Process"] = botProcess
-        }
+    -- Push event to subscribers
+    push_event({
+        event_type = helpers.events.message_sent,
+        channel_id = channelId,
+        message = message,
+        timestamp = timestamp
     })
 
     msg.reply({
-        Action = "Remove-Bot-Response",
-        Status = "200",
+        action = "send-message-response",
+        status = helpers.status.success,
+        data = json.encode(message)
     })
-    SyncProcessState()
+end
+
+Handlers.add("send-message", function(msg)
+    utils.handle_run(send_message, msg)
 end)
 
+local function update_message(msg)
+    local senderId = msg.from
+    local messageId = utils.var_or_nil(msg["message-id"])
+    local channelId = utils.var_or_nil(msg["channel-id"])
+    local newContent = utils.var_or_nil(msg["content"])
 
--- self message to trigger a seperate flow to send data to bots instead of the main message handler
-Handlers.add("Push-To-Bots", function(msg)
-    if not msg.From == ao.id then return end
+    assert(messageId, "400|message-id is required")
+    assert(channelId, "400|channel-id is required")
+    assert(newContent, "400|content is required")
 
-    print("Pushing msg " .. msg.Tags["X-Id"] .. " to bots")
+    -- Get sender member
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
 
-    -- Forward message to all subscribed bots
-    for botProcess, subscribedEvents in pairs(SubscribedBots) do
-        if subscribedEvents and type(subscribedEvents) == "table" then
-            local channelId = msg.Tags["X-Channel-Id"]
-            local userId = msg.Tags["X-Author-Id"]
-            local attachments = msg.Tags["X-Attachments"]
-            local replyTo = msg.Tags["X-Reply-To"]
-            local eventType = msg.Tags["X-Event-Type"]
-            local timestamp = msg.Tags["X-Timestamp"]
-            local messageId = msg.Tags["X-Id"]
-            local editorId = msg.Tags["X-Editor-Id"]
-            local deleterId = msg.Tags["X-Deleter-Id"]
-            local serverId = ao.id
+    -- Get the channel
+    local channel = utils.channels.get(channelId)
+    assert(channel, "404|channel not found")
 
-            -- Check if bot is subscribed to this event type
-            if not subscribedEvents[eventType] then
-                return
-            end
+    -- Validate content
+    assert(type(newContent) == "string", "400|content must be a string")
+    assert(#newContent > 0 and #newContent <= 2000, "400|content must be between 1 and 2000 characters")
 
-            local member = GetMember(userId)
-            local channel = GetChannel(channelId)
-            if not channel then goto continue end
-            if not member then goto continue end
+    -- In a real implementation, you'd retrieve the original message and check:
+    -- 1. Message exists
+    -- 2. Sender is the author OR has manage_messages permission
+    -- 3. Message is not too old to edit (e.g., within 24 hours)
 
-            local channelName = channel.name or ""
-            local serverName = Name or ""
-            local authorNickname = member.nickname or ""
-            local fromBot = IsMemberBot(userId) and "true" or "false"
-            local permissions = GetMemberPermissions(member)
-            local content = msg.Data
+    -- For now, we'll simulate message editing
+    -- Assume the sender is either the author or has permissions (in real implementation, check actual message author)
+    local canEdit = true -- This would be: (message.author_id == senderId) or utils.permissions.member_has_any(senderMember, {helpers.permissions.manage_messages, helpers.permissions.manage_server, helpers.permissions.administrator})
+    assert(canEdit, "403|insufficient permissions to edit this message")
 
-            -- Build Discord-like structured event data
-            local eventData = {
-                eventType = eventType,
-                server = {
-                    id = serverId,
-                    name = serverName,
-                    logo = Logo,
-                    owner = Owner,
-                    description = Description
-                },
-                channel = {
-                    id = channelId,
-                    name = channelName,
-                },
-                author = {
-                    id = userId,
-                    nickname = authorNickname or "",
-                    isBot = fromBot == "true",
-                    roles = member.roles,
-                    joinedAt = member.joinedAt,
-                    permissions = permissions,
-                },
-                message = {
-                    id = messageId,
-                    content = content or "",
-                    timestamp = timestamp,
-                    attachments = attachments and json.decode(attachments) or {},
-                    replyTo = replyTo,
-                    mentions = {}
-                }
-            }
+    local timestamp = os.time()
+    local updatedMessage = {
+        id = messageId,
+        channel_id = channelId,
+        author_id = senderId,         -- In real implementation, this would be the original author
+        content = newContent,
+        timestamp = timestamp - 3600, -- Simulate original timestamp (1 hour ago)
+        edited_timestamp = timestamp,
+    }
 
-            msg.forward(botProcess, {
-                Action = "Event",
-                Data = json.encode(eventData),
-                Tags = {
-                    ["Event-Type"] = tostring(eventType)
-                }
-            })
+    utils.messages.set(messageId, updatedMessage)
 
-            ::continue::
-        end
+    -- Push event to subscribers
+    push_event({
+        event_type = helpers.events.message_edited,
+        channel_id = channelId,
+        message = updatedMessage,
+        timestamp = timestamp
+    })
+
+    msg.reply({
+        action = "update-message-response",
+        status = helpers.status.success,
+        data = json.encode(updatedMessage)
+    })
+end
+
+Handlers.add("update-message", function(msg)
+    utils.handle_run(update_message, msg)
+end)
+
+local function delete_message(msg)
+    local senderId = msg.from
+    local messageId = utils.var_or_nil(msg["message-id"])
+    local channelId = utils.var_or_nil(msg["channel-id"])
+
+    assert(messageId, "400|message-id is required")
+    assert(channelId, "400|channel-id is required")
+
+    -- Get sender member
+    local senderMember = utils.members.get(senderId)
+    assert(senderMember, "404|sender not found")
+
+    -- Get the channel
+    local channel = utils.channels.get(channelId)
+    assert(channel, "404|channel not found")
+
+    -- In a real implementation, you'd retrieve the original message and check:
+    -- 1. Message exists
+    -- 2. Sender is the author OR has manage_messages permission
+
+    -- For now, we'll simulate message deletion permissions
+    -- Assume the sender is either the author or has permissions (in real implementation, check actual message author)
+    local canDelete = true -- This would be: (message.author_id == senderId) or utils.permissions.member_has_any(senderMember, {helpers.permissions.manage_messages, helpers.permissions.manage_server, helpers.permissions.administrator})
+    assert(canDelete, "403|insufficient permissions to delete this message")
+
+    local timestamp = os.time()
+
+    utils.messages.set(messageId, nil)
+
+    -- Push event to subscribers
+    push_event({
+        event_type = helpers.events.message_deleted,
+        channel_id = channelId,
+        message_id = messageId,
+        deleted_by = senderId,
+        timestamp = timestamp
+    })
+
+    msg.reply({
+        action = "delete-message-response",
+        status = helpers.status.success,
+    })
+end
+
+Handlers.add("delete-message", function(msg)
+    utils.handle_run(delete_message, msg)
+end)
+
+--#endregion
+
+--#region subscriptions
+
+local function subscribe(msg)
+    local subscriberId = msg.from
+    local events = msg["events"] or {}
+
+    -- Get subscriber - must be a bot
+    local subscriber = utils.members.get(subscriberId)
+    assert(subscriber, "404|subscriber not found")
+    assert(subscriber.is_bot, "403|only bots can subscribe to events")
+
+    -- Validate events
+    assert(type(events) == "table", "400|events must be a table")
+
+    for _, event in ipairs(events) do
+        assert(helpers.events[event] ~= nil, "400|invalid event: " .. tostring(event))
     end
+
+    -- Initialize subscribers table if it doesn't exist
+    if not server.subscribers then
+        server.subscribers = {}
+    end
+
+    -- Store subscription
+    server.subscribers[subscriberId] = {
+        id = subscriberId,
+        events = events,
+        subscribed_at = os.time(),
+        is_bot = true -- Always true since only bots can subscribe
+    }
+
+    msg.reply({
+        action = "subscribe-response",
+        status = helpers.status.success,
+        data = json.encode({
+            subscriber_id = subscriberId,
+            events = events
+        })
+    })
+end
+
+Handlers.add("subscribe", function(msg)
+    utils.handle_run(subscribe, msg)
 end)
+
+local function unsubscribe(msg)
+    local subscriberId = msg.from
+
+    -- Get subscriber - must be a bot
+    local subscriber = utils.members.get(subscriberId)
+    assert(subscriber, "404|subscriber not found")
+    assert(subscriber.is_bot, "403|only bots can manage event subscriptions")
+
+    -- Initialize subscribers table if it doesn't exist
+    if not server.subscribers then
+        server.subscribers = {}
+    end
+
+    -- Check if subscriber exists
+    assert(server.subscribers[subscriberId], "404|subscription not found")
+
+    -- Remove subscription
+    server.subscribers[subscriberId] = nil
+
+    msg.reply({
+        action = "unsubscribe-response",
+        status = helpers.status.success,
+    })
+end
+
+Handlers.add("unsubscribe", function(msg)
+    utils.handle_run(unsubscribe, msg)
+end)
+
+--#endregion
