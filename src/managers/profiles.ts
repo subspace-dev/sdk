@@ -8,6 +8,16 @@ import { SubspaceValidation } from "../utils/validation";
 
 export class SubspaceProfiles {
 
+    /**
+     * Ensures Subspace is initialized before proceeding with operations
+     * @throws Error if Subspace is not initialized
+     */
+    private static ensureInitialized(): void {
+        if (!Subspace.initialized) {
+            throw new Error("Subspace not initialized. Please call Subspace.init() first.");
+        }
+    }
+
     static formatProfile(profile: IProfile): IProfile {
         if (profile && profile.servers) {
             Object.keys(profile.servers).forEach(serverId => {
@@ -18,6 +28,9 @@ export class SubspaceProfiles {
     }
 
     public static async createProfile({ pfp, banner, bio }: ICreateProfile): Promise<IProfile> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate inputs before making any backend calls
         SubspaceValidation.validateProfileFields({ pfp, banner, bio });
 
@@ -46,6 +59,9 @@ export class SubspaceProfiles {
     }
 
     public static async getProfile(id: string): Promise<IProfile> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate user ID
         SubspaceValidation.validateUserId(id);
 
@@ -54,6 +70,9 @@ export class SubspaceProfiles {
     }
 
     public static async updateProfile({ pfp, banner, bio }: ICreateProfile): Promise<IProfile> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate inputs before making any backend calls
         SubspaceValidation.validateProfileFields({ pfp, banner, bio });
 

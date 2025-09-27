@@ -31,6 +31,16 @@ import { SubspaceValidation, ValidationError } from "../utils/validation";
 export class SubspaceServers {
     //#region core
 
+    /**
+     * Ensures Subspace is initialized before proceeding with operations
+     * @throws Error if Subspace is not initialized
+     */
+    private static ensureInitialized(): void {
+        if (!Subspace.initialized) {
+            throw new Error("Subspace not initialized. Please call Subspace.init() first.");
+        }
+    }
+
     static formatRole(role: IRole): IRole {
         if (role) {
             if (role.mentionable && typeof role.mentionable == "string") {
@@ -62,6 +72,9 @@ export class SubspaceServers {
     }
 
     public static async createServer(input: ICreateServer): Promise<IServer> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate inputs before making any backend calls
         SubspaceValidation.validateServerCreation({
             serverName: input.serverName,
@@ -106,6 +119,9 @@ export class SubspaceServers {
     }
 
     public static async getServer(serverId: string): Promise<IServer> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate server ID
         SubspaceValidation.validateServerId(serverId);
 
@@ -114,6 +130,9 @@ export class SubspaceServers {
     }
 
     public static async getServerMembers(serverId: string): Promise<Record<string, IMember>> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate server ID
         SubspaceValidation.validateServerId(serverId);
 
@@ -125,6 +144,9 @@ export class SubspaceServers {
     }
 
     public static async getServerMember({ serverId, userId }: IGetMember): Promise<IMember> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate server ID
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateUserId(userId);
@@ -134,6 +156,9 @@ export class SubspaceServers {
     }
 
     public static async updateServer({ serverId, serverName, serverDescription, serverPfp, serverBanner }: IUpdateServer): Promise<IServer> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateServerUpdate({
@@ -163,18 +188,33 @@ export class SubspaceServers {
         log({ type: "debug", label: "Joining Server [1/2]", data: serverId })
         const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
         log({ type: "output", label: "Joining Server [1/2]", data: res })
+
+        await new Promise(resolve => setTimeout(resolve, 1000))
+
         let retries = 0
         const maxRetries = 5
         while (retries < maxRetries) {
-            const p = await SubspaceProfiles.getProfile(Subspace.address)
-            const approved = p.servers[serverId].approved
-            if (approved) {
-                log({ type: "output", label: "Joined Server [2/2]", data: { approved } })
-                return true
+            try {
+                const p = await SubspaceProfiles.getProfile(Subspace.address)
+
+                // Check if server entry exists and is approved
+                const serverEntry = p.servers?.[serverId]
+                // Handle both boolean and string values from AO serialization
+                const isApproved = serverEntry && (serverEntry.approved === true || (serverEntry as any).approved === "true")
+                if (isApproved) {
+                    log({ type: "output", label: "Joined Server [2/2]", data: { approved: true } })
+                    return true
+                }
+
+                const approved = serverEntry?.approved || false
+                log({ type: "debug", label: "Retry Joining Server [2/2]", data: { approved, retries, serverEntry } })
+                await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)))
+                retries++
+            } catch (error) {
+                log({ type: "error", label: "Error checking server approval", data: { error, retries } })
+                await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)))
+                retries++
             }
-            log({ type: "debug", label: "Retry Joining Server [2/2]", data: { approved, retries } })
-            await new Promise(resolve => setTimeout(resolve, 1000 * (retries + 1)))
-            retries++
         }
         return false
     }
@@ -468,6 +508,9 @@ export class SubspaceServers {
     }
 
     public static async sendMessage({ serverId, channelId, content, attachments }: ISendMessage): Promise<IMessage> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateChannelId(channelId);

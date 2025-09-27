@@ -605,20 +605,17 @@ end)
 
 local function add_member(msg)
     local senderId = msg.from
-    assert(senderId == subspace_id, "403|unauthorized sender")
     local userId = msg["user-id"]
     local isBot = msg["is-bot"]
 
+
+    assert(senderId == subspace_id, "403|unauthorized sender")
     assert(userId, "400|user-id is required")
 
     -- Check if user is banned
     assert(not helpers.bans[userId], "403|user is banned from this server")
 
-    -- Check if user is already a member
-    local existingMember = utils.members.get(userId)
-    local isNewMember = not existingMember
-
-    local memberData = existingMember or {
+    local memberData = {
         id = userId,
         nickname = "",
         joined_at = os.time(),
@@ -634,10 +631,8 @@ local function add_member(msg)
     -- Assign the @everyone role using role_utils
     role_utils.assign("@", userId)
 
-    -- Only increment member count for new members
-    if isNewMember then
-        server.member_count = math.max(server.member_count + 1, 0)
-    end
+    -- Increment member count
+    server.member_count = math.max(server.member_count + 1, 0)
 
     -- Push event to subscribers
     push_event({
@@ -1242,10 +1237,51 @@ local function create_role(msg)
     local senderId = msg.from
     local roleName = utils.var_or_nil(msg["role-name"])
     local roleColor = utils.var_or_nil(msg["role-color"])
-    local rolePermissions = msg["role-permissions"] or 0
+    local rolePermissions = utils.var_or_nil(msg["role-permissions"]) or 0
     local roleOrder = msg["role-order"]
     local mentionable = msg["mentionable"]
     local hoist = msg["hoist"]
+
+    -- Convert and validate rolePermissions if provided
+    if rolePermissions and rolePermissions ~= 0 then
+        local numPermissions = tonumber(rolePermissions)
+        if numPermissions == nil then
+            error("400|role-permissions must be a number!")
+        end
+        rolePermissions = numPermissions --[[@as integer]]
+    elseif rolePermissions == 0 then
+        -- Default value is already 0, ensure it's a number
+        rolePermissions = 0
+    end
+
+    -- Convert and validate boolean fields
+    if mentionable ~= nil then
+        if type(mentionable) == "string" then
+            if mentionable == "true" then
+                mentionable = true
+            elseif mentionable == "false" then
+                mentionable = false
+            else
+                error("400|mentionable must be a boolean!")
+            end
+        elseif type(mentionable) ~= "boolean" then
+            error("400|mentionable must be a boolean!")
+        end
+    end
+
+    if hoist ~= nil then
+        if type(hoist) == "string" then
+            if hoist == "true" then
+                hoist = true
+            elseif hoist == "false" then
+                hoist = false
+            else
+                error("400|hoist must be a boolean!")
+            end
+        elseif type(hoist) ~= "boolean" then
+            error("400|hoist must be a boolean!")
+        end
+    end
 
     assert(roleName, "400|role-name is required")
     assert(type(roleName) == "string", "400|role-name must be a string")
@@ -1263,7 +1299,7 @@ local function create_role(msg)
 
     -- Validate permissions
     if rolePermissions then
-        assert(type(rolePermissions) == "number", "400|role-permissions must be a number")
+        assert(type(rolePermissions) == "number", "400|role-permissions must be a number!")
         assert(rolePermissions >= 0, "400|role-permissions must be non-negative")
     end
 
@@ -1315,10 +1351,48 @@ local function update_role(msg)
     local roleId = utils.var_or_nil(msg["role-id"])
     local roleName = utils.var_or_nil(msg["role-name"])
     local roleColor = utils.var_or_nil(msg["role-color"])
-    local rolePermissions = msg["role-permissions"]
-    local roleOrder = msg["role-order"]
-    local mentionable = msg["mentionable"]
-    local hoist = msg["hoist"]
+    local rolePermissions = utils.var_or_nil(msg["role-permissions"])
+    local roleOrder = utils.var_or_nil(msg["role-order"])
+    local mentionable = utils.var_or_nil(msg["mentionable"])
+    local hoist = utils.var_or_nil(msg["hoist"])
+
+    -- Convert and validate rolePermissions if provided
+    if rolePermissions then
+        local numPermissions = tonumber(rolePermissions)
+        if numPermissions == nil then
+            error("400|role-permissions must be a number!")
+        end
+        rolePermissions = numPermissions --[[@as integer]]
+    end
+
+    -- Convert and validate boolean fields
+    if mentionable ~= nil then
+        if type(mentionable) == "string" then
+            if mentionable == "true" then
+                mentionable = true
+            elseif mentionable == "false" then
+                mentionable = false
+            else
+                error("400|mentionable must be a boolean!")
+            end
+        elseif type(mentionable) ~= "boolean" then
+            error("400|mentionable must be a boolean!")
+        end
+    end
+
+    if hoist ~= nil then
+        if type(hoist) == "string" then
+            if hoist == "true" then
+                hoist = true
+            elseif hoist == "false" then
+                hoist = false
+            else
+                error("400|hoist must be a boolean!")
+            end
+        elseif type(hoist) ~= "boolean" then
+            error("400|hoist must be a boolean!")
+        end
+    end
 
     assert(roleId, "400|role-id is required")
     assert(roleId ~= "@", "400|cannot update everyone role")
@@ -1357,7 +1431,7 @@ local function update_role(msg)
     end
 
     if rolePermissions ~= nil then
-        assert(type(rolePermissions) == "number", "400|role-permissions must be a number")
+        assert(type(rolePermissions) == "number", "400|role-permissions must be a number!")
         assert(rolePermissions >= 0, "400|role-permissions must be non-negative")
         role.permissions = rolePermissions
     end
@@ -1368,12 +1442,10 @@ local function update_role(msg)
     end
 
     if mentionable ~= nil then
-        assert(type(mentionable) == "boolean", "400|mentionable must be a boolean")
         role.mentionable = mentionable
     end
 
     if hoist ~= nil then
-        assert(type(hoist) == "boolean", "400|hoist must be a boolean")
         role.hoist = hoist
     end
 

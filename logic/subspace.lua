@@ -12,7 +12,7 @@ sources = {
         version = "1.0.0"
     },
     server = {
-        id = "rE83-07MpDfdCLr_6zwLQUeuwRj8UQlWGLTue1hubzc",
+        id = "OqSVU39zYdmYDhoHDJwnLJmTdGK_nDd7peOPTIpmP7w",
         version = "1.0.0"
     },
 }
@@ -663,57 +663,33 @@ local function join_server(msg)
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
 
-    local alreadyMember = false
-    local needsServerUpdate = false
-
     if isBot then
         -- Cast entity to bot type
         local bot = entity --[[@as Bot]]
-        -- Check if already approved
-        if bot.servers[serverId] and bot.servers[serverId].approved then
-            alreadyMember = true
-        else
-            -- Either not in server or not approved yet
-            if not bot.servers[serverId] then
-                needsServerUpdate = true
-            end
-            bot.servers[serverId] = { approved = false }
-            utils.bots.set(userId, bot)
-        end
+        bot.servers[serverId] = { approved = false }
+        utils.bots.set(userId, bot)
     else
         -- Cast entity to profile type
         local profile = entity --[[@as Profile]]
-        -- Check if already approved
-        if profile.servers[serverId] and profile.servers[serverId].approved then
-            alreadyMember = true
-        else
-            -- Either not in server or not approved yet
-            if not profile.servers[serverId] then
-                needsServerUpdate = true
-            end
-            profile.servers[serverId] = {
-                order_id = utils.servers.get_next_order_id(profile),
-                approved = false
-            }
-            utils.profiles.set(userId, profile)
-            utils.servers.reorder_servers(profile)
-        end
+        profile.servers[serverId] = {
+            order_id = utils.servers.get_next_order_id(profile),
+            approved = false
+        }
+        utils.profiles.set(userId, profile)
+        utils.servers.reorder_servers(profile)
     end
 
-    -- Only send add-member to server if user is not already a member
-    if not alreadyMember then
-        send({
-            target      = serverId,
-            action      = "add-member",
-            ["user-id"] = userId,
-            ["is-bot"]  = isBot,
-        })
-    end
+    -- Send add-member request to server
+    send({
+        target      = serverId,
+        action      = "add-member",
+        ["user-id"] = userId,
+        ["is-bot"]  = isBot,
+    })
 
-    local responseStatus = alreadyMember and helpers.status.success or helpers.status.accepted
     msg.reply({
         action = "join-server-response",
-        status = responseStatus,
+        status = helpers.status.accepted,
     })
 end
 
@@ -726,6 +702,9 @@ local function approve_add_member(msg)
     local userId = utils.var_or_nil(msg["user-id"])
     local status = utils.var_or_nil(msg["status"])
     local isBot = utils.profiles.is_bot(userId)
+
+    print("DEBUG: approve_add_member called - serverId=" ..
+        serverId .. ", userId=" .. userId .. ", status=" .. tostring(status))
 
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")

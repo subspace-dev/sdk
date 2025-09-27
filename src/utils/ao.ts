@@ -47,12 +47,14 @@ export class AO {
     public gatewayUrl: string;
     private signer?: any;
     public address?: string;
+    public operatorAddress?: string;
 
     constructor(params: MainnetOptions) {
         this.hbUrl = params.HB_URL || Defaults.HB_URL;
         this.gatewayUrl = params.GATEWAY_URL || Defaults.GATEWAY_URL;
         this.signer = params.signer;
         this.address = params.address;
+        this.operatorAddress = null;
     }
 
     public ao() {
@@ -134,11 +136,14 @@ export class AO {
     }
 
     async operator(): Promise<string> {
+        if (this.operatorAddress) return this.operatorAddress
+        if (!this.hbUrl) throw new Error("HB URL not set")
         const hashpath = this.hbUrl + '/~meta@1.0/info/address'
         log({ type: "input", label: "Fetching Operator Address", data: hashpath })
         const { result, duration } = await withDuration(() => fetch(hashpath))
         const scheduler = (await result.text()).trim()
         log({ type: "success", label: "Fetched Operator Address", data: scheduler, duration })
+        this.operatorAddress = scheduler
         return scheduler
     }
 
@@ -159,7 +164,18 @@ export class AO {
         }
         const resultJson = await result.json()
         log({ type: "output", label: "Process State Read", data: resultJson, duration })
-        return this.sanitizeResponse(resultJson) as T
+
+        const sanitized = this.sanitizeResponse(resultJson)
+
+        // Check if ao-result exists and extract the value from the specified key
+        if (sanitized['ao-result'] && typeof sanitized['ao-result'] === 'string') {
+            const targetKey = sanitized['ao-result']
+            if (sanitized[targetKey] !== undefined) {
+                return sanitized[targetKey] as T
+            }
+        }
+
+        return sanitized as T
     }
 
     async write({ processId, tags, data }: { processId: string, tags?: { name: string; value: string }[], data?: any }): Promise<WriteResponse | null> {

@@ -42,17 +42,19 @@ export class Subspace {
             address: options.address
         });
         this.address = options.address
-        this.initialized = true;
-        Utils.log({ type: "success", label: "Subspace initialized", data: options })
+        this.initialized = false;
         try {
             await this.getSources()
+            this.initialized = true;
+            Utils.log({ type: "success", label: "Subspace initialized", data: options })
         } catch (error) {
-            console.error("Failed to fetch sources:", error)
+            Utils.log({ type: "error", label: "Subspace initialization failed", data: error })
+            this.initialized = false;
         }
     }
 
-    public static ao() {
-        if (!this.initialized) {
+    public static ao({ noCheck = false }: { noCheck?: boolean } = { noCheck: false }) {
+        if (!this.initialized && !noCheck) {
             throw new Error("Subspace not yet initialized")
         }
         return this.ao_;
@@ -62,12 +64,12 @@ export class Subspace {
         try {
             if (this.fetchingSources) return;
             this.fetchingSources = true;
-            const s = await this.ao().read<Sources>({ path: `/${Constants.subspaceProcess}/now/sources` })
+            const s = await this.ao({ noCheck: true }).read<Sources>({ path: `/${Constants.subspaceProcess}/now/sources` })
 
             const promises = [
-                fetch(`${this.ao().gatewayUrl}/${s.bot.id}`),
-                fetch(`${this.ao().gatewayUrl}/${s.dm.id}`),
-                fetch(`${this.ao().gatewayUrl}/${s.server.id}`),
+                fetch(`${this.ao({ noCheck: true }).gatewayUrl}/${s.bot.id}`),
+                fetch(`${this.ao({ noCheck: true }).gatewayUrl}/${s.dm.id}`),
+                fetch(`${this.ao({ noCheck: true }).gatewayUrl}/${s.server.id}`),
             ]
             const [bot, dm, server] = await Promise.all(promises)
 
@@ -79,9 +81,10 @@ export class Subspace {
             this.fetchingSources = false;
             return s
         } catch (error) {
-            console.error("Failed to fetch sources:", error)
+            Utils.log({ type: "error", label: "Failed to fetch sources", data: error })
             this.fetchingSources = false;
-            return null
+            this.initialized = false;
+            throw error
         }
     }
 }
