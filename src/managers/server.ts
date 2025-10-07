@@ -565,7 +565,7 @@ export class SubspaceServers {
         // Validate inputs
         SubspaceValidation.validateServerId(serverId);
         SubspaceValidation.validateUserId(userId);
-        SubspaceValidation.validateStringWithLength(nickname, "nickname", 1, 32);
+        SubspaceValidation.validateStringWithLength(nickname, "nickname", 1, 32, false);
 
         const tags: Tag[] = [{ name: "Action", value: "update-member" }]
 

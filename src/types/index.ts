@@ -1,6 +1,14 @@
+import { toast } from "sonner"
 
 // Export all input types under Inputs namespace
 import * as InputTypes from "./inputs"
+
+declare global {
+    interface Window {
+        toast: typeof toast
+    }
+}
+
 export namespace Inputs {
     export type ICreateProfile = InputTypes.ICreateProfile
     export type ICreateServer = InputTypes.ICreateServer

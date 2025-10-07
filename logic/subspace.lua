@@ -12,7 +12,7 @@ sources = {
         version = "1.0.0"
     },
     server = {
-        id = "OqSVU39zYdmYDhoHDJwnLJmTdGK_nDd7peOPTIpmP7w",
+        id = "O1DJ3Jhs7o3e5ukXtm_7zpb60Nydv2tkfr6DR-FPifY",
         version = "1.0.0"
     },
 }

@@ -729,7 +729,12 @@ local function update_member(msg)
         }), "403|insufficient permissions to update member")
     end
 
-    member.nickname = nickname or member.nickname or ""
+    -- Allow setting nickname to nil to unset it
+    if nickname == "__unset__" then
+        member.nickname = "" -- Set to empty string when unsetting
+    else
+        member.nickname = tostring(nickname)
+    end
     utils.members.set(userId, member)
 
     msg.reply({

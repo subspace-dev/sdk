@@ -206,6 +206,14 @@ export class AO {
         let res = this.checkErrors(await JSON.parse((result as any).body) as WriteResponse)
         log({ type: res.error ? "error" : "output", label: res.error ? "Write Error" : "Write Success", data: res, duration })
         if (res.error) {
+            const xErrorAction = res.error?.['x-action']
+            const xErrorMsg = res.error?.['x-error']
+            const xErrorStatus = res.error?.['x-status']
+            if (window && window.toast) {
+                window.toast.error(`[${xErrorStatus}] ${xErrorAction}: ${xErrorMsg}`)
+            } else {
+                console.warn("[AO] No window.toast found, skipping toast notification")
+            }
             throw new WriteError(res.error)
         }
         return res
