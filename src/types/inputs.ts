@@ -141,7 +141,7 @@ export interface IDeleteDM {
 export interface IUpdateMember {
     serverId: string
     userId: string
-    nickname?: string
+    nickname?: string | null
 }
 
 export interface IKickMember {

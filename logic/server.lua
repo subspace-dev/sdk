@@ -3,6 +3,7 @@ local json = require("json")
 --#region configuration
 
 subspace_id = subspace_id or "<<SUBSPACE>>"
+version_ = version_ or "1.0.0"
 
 --#endregion
 
@@ -121,6 +122,7 @@ bots = bots or {}
 messages = messages or {}
 
 server = server or {
+    version = version_,
     --- @type Server
     profile = {
         id = id,

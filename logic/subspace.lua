@@ -4,15 +4,15 @@ local json = require("json")
 
 sources = {
     bot = {
-        id = "-39AGlB7YiOkJNVaKqmyBf23PYhWo1fM-1vPqaRF_Uk",
+        id = "An-dabO757iWycnFqP50QwxALeSPP4rYA0Cy29D_SLo",
         version = "1.0.0"
     },
     dm = {
-        id = "r_riETrqmeSxkAjMFY3-hGSVIw_3idegT9oO6GCfMqo",
+        id = "LDGYY5mY81o5r10P5cGrC5zGGQ4a-PEheBUueT_EeM8",
         version = "1.0.0"
     },
     server = {
-        id = "O1DJ3Jhs7o3e5ukXtm_7zpb60Nydv2tkfr6DR-FPifY",
+        id = "TQeOHHI1ouVq04-hxYd9h-fu2j0B1qOG8SNM9C4jv7k",
         version = "1.0.0"
     },
 }

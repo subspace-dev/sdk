@@ -179,6 +179,26 @@ export class SubspaceServers {
         return Subspace.ao().matchAction<IServer>("update-server-response", res)
     }
 
+    public static async updateServerSource(serverId: string): Promise<boolean> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate server ID
+        SubspaceValidation.validateServerId(serverId);
+
+        // Fetch the latest server source
+        let serverSource = Subspace.sources.server.lua
+        if (!serverSource) await Subspace.getSources()
+        serverSource = Subspace.sources.server.lua
+        if (!serverSource) throw new Error("server source not found")
+        serverSource = serverSource.replace("<<SUBSPACE>>", Constants.subspaceProcess)
+
+        // Update the server process with the new source code
+        await Subspace.ao().runLua({ processId: serverId, code: serverSource })
+
+        return true
+    }
+
     public static async joinServer(serverId: string): Promise<boolean> {
         // Validate server ID
         SubspaceValidation.validateServerId(serverId);
@@ -570,7 +590,13 @@ export class SubspaceServers {
         const tags: Tag[] = [{ name: "Action", value: "update-member" }]
 
         tags.push({ name: "user-id", value: userId })
-        if (nickname) tags.push({ name: "nickname", value: nickname })
+
+        // Handle nickname: if null/undefined/empty, send "__unset__" to properly clear the nickname
+        if (nickname === null) {
+            tags.push({ name: "nickname", value: "__unset__" })
+        } else if (nickname) {
+            tags.push({ name: "nickname", value: nickname })
+        }
 
         const res = await Subspace.ao().write({ processId: serverId, tags: tags })
         const member = Subspace.ao().matchAction<IMember>("update-member-response", res)

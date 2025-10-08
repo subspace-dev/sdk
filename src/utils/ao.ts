@@ -210,7 +210,7 @@ export class AO {
             const xErrorMsg = res.error?.['x-error']
             const xErrorStatus = res.error?.['x-status']
             if (window && window.toast) {
-                window.toast.error(`[${xErrorStatus}] ${xErrorAction}: ${xErrorMsg}`)
+                window.toast.error(`${xErrorMsg}`, { richColors: true })
             } else {
                 console.warn("[AO] No window.toast found, skipping toast notification")
             }

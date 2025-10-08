@@ -3,6 +3,7 @@ local json = require("json")
 --#region configuration
 
 subspace_id = "<<SUBSPACE>>"
+version_ = version_ or "1.0.0"
 
 --#endregion
 
@@ -91,6 +92,7 @@ end
 bot = bot or {
     id = id,
     owner_id = owner,
+    version = version_,
     name = "",
     description = "",
     pfp = "",

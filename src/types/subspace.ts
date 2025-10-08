@@ -20,6 +20,7 @@ export interface IBot {
     banner: string;
     servers: Record<string, { approved: boolean }>;
     required_events: Record<number, string>;
+    version: string;
 }
 
 export interface IServer {
@@ -35,6 +36,7 @@ export interface IServer {
         owner: string;
         pfp: string;
     };
+    version: string;
 }
 
 export interface IMember {
