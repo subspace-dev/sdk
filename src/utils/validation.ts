@@ -90,7 +90,7 @@ export class SubspaceValidation {
      * Validates message content
      */
     static validateMessageContent(content: string | null | undefined): void {
-        this.validateStringWithLength(content, "content", 1, 2000);
+        this.validateString(content, "content", true);
     }
 
     /**
@@ -358,7 +358,7 @@ export class SubspaceValidation {
         }
 
         if (content) {
-            this.validateStringWithLength(content, "content", 1, 2000, false);
+            this.validateString(content, "content", false);
         }
 
         if (attachments && attachments.length > 0) {

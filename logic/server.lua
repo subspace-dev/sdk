@@ -1649,7 +1649,7 @@ local function send_message(msg)
     -- Validate content
     if content then
         assert(type(content) == "string", "400|content must be a string")
-        assert(#content > 0 and #content <= 2000, "400|content must be between 1 and 2000 characters")
+        assert(#content > 0, "400|content must not be empty")
     end
 
     -- Validate attachments if present
@@ -1736,7 +1736,7 @@ local function update_message(msg)
 
     -- Validate content
     assert(type(newContent) == "string", "400|content must be a string")
-    assert(#newContent > 0 and #newContent <= 2000, "400|content must be between 1 and 2000 characters")
+    assert(#newContent > 0, "400|content must not be empty")
 
     -- In a real implementation, you'd retrieve the original message and check:
     -- 1. Message exists
