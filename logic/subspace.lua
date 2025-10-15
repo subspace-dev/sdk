@@ -4,15 +4,15 @@ local json = require("json")
 
 sources = {
     bot = {
-        id = "An-dabO757iWycnFqP50QwxALeSPP4rYA0Cy29D_SLo",
+        id = "_cLoz3kWF8GSqE2D7Dk0uTvzvVy-W-DG_oDmR3oLS9U",
         version = "1.0.0"
     },
     dm = {
-        id = "LDGYY5mY81o5r10P5cGrC5zGGQ4a-PEheBUueT_EeM8",
+        id = "tGSE7vhTLPQsDnqVI0YHzbpYo-CvNLeAhaQo7VjD8hI",
         version = "1.0.0"
     },
     server = {
-        id = "TQeOHHI1ouVq04-hxYd9h-fu2j0B1qOG8SNM9C4jv7k",
+        id = "4DByyyvwGSH3BfGel6VsJ27aSlGClEp38-tYv8Nudag",
         version = "1.0.0"
     },
 }
@@ -962,7 +962,7 @@ end)
 
 --#region direct_messages
 
--- both people should be friends to send dms
+-- DMs can be sent to friends or non-friends (temporary conversations)
 local function send_dm(msg)
     local senderId = msg.from
     local receiverId = utils.var_or_nil(msg["receiver-id"])
@@ -979,13 +979,12 @@ local function send_dm(msg)
     local receiverProfile = utils.profiles.get(receiverId)
     assert(receiverProfile, "404|receiver profile not found")
 
-    -- Verify both users are friends
-    assert(senderProfile.friends.accepted[receiverId], "403|not friends with receiver")
-    assert(receiverProfile.friends.accepted[senderId], "403|receiver not friends with sender")
-
     -- Verify both users have DM processes
     assert(senderProfile.dm_process and #senderProfile.dm_process == 43, "400|sender has no valid dm process")
     assert(receiverProfile.dm_process and #receiverProfile.dm_process == 43, "400|receiver has no valid dm process")
+
+    -- Check if users are friends
+    local areFriends = senderProfile.friends.accepted[receiverId] and receiverProfile.friends.accepted[senderId]
 
     -- Forward message to both DM processes
     local messageData = {
@@ -1004,7 +1003,8 @@ local function send_dm(msg)
         ["message-id"] = messageData["message-id"],
         ["content"] = messageData["content"],
         ["author-id"] = messageData["author-id"],
-        ["timestamp"] = messageData["timestamp"]
+        ["timestamp"] = messageData["timestamp"],
+        ["is-friend-conversation"] = areFriends
     })
 
     -- Send to receiver's DM process
@@ -1015,7 +1015,8 @@ local function send_dm(msg)
         ["message-id"] = messageData["message-id"],
         ["content"] = messageData["content"],
         ["author-id"] = messageData["author-id"],
-        ["timestamp"] = messageData["timestamp"]
+        ["timestamp"] = messageData["timestamp"],
+        ["is-friend-conversation"] = areFriends
     })
 
     msg.reply({
@@ -1023,7 +1024,8 @@ local function send_dm(msg)
         status = helpers.status.success,
         data = json.encode({
             message_id = messageId,
-            timestamp = timestamp
+            timestamp = timestamp,
+            is_friend_conversation = areFriends
         })
     })
 end
@@ -1047,10 +1049,6 @@ local function edit_dm(msg)
 
     local receiverProfile = utils.profiles.get(receiverId)
     assert(receiverProfile, "404|receiver profile not found")
-
-    -- Verify both users are friends
-    assert(senderProfile.friends.accepted[receiverId], "403|not friends with receiver")
-    assert(receiverProfile.friends.accepted[senderId], "403|receiver not friends with sender")
 
     -- Verify both users have DM processes
     assert(senderProfile.dm_process and #senderProfile.dm_process == 43, "400|sender has no valid dm process")
@@ -1104,10 +1102,6 @@ local function delete_dm(msg)
 
     local receiverProfile = utils.profiles.get(receiverId)
     assert(receiverProfile, "404|receiver profile not found")
-
-    -- Verify both users are friends
-    assert(senderProfile.friends.accepted[receiverId], "403|not friends with receiver")
-    assert(receiverProfile.friends.accepted[senderId], "403|receiver not friends with sender")
 
     -- Verify both users have DM processes
     assert(senderProfile.dm_process and #senderProfile.dm_process == 43, "400|sender has no valid dm process")

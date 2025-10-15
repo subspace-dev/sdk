@@ -1,5 +1,5 @@
 import { Subspace } from "..";
-import type { IProfile, Tag } from "../types/subspace";
+import type { IMessage, IProfile, Tag } from "../types/subspace";
 import type {
     ICreateProfile,
 } from "../types/inputs";
@@ -149,6 +149,9 @@ export class SubspaceProfiles {
     }
 
     public static async sendDM({ userId, content }: { userId: string, content: string }): Promise<boolean> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate DM parameters
         SubspaceValidation.validateDMParams({ userId, content });
 
@@ -160,7 +163,64 @@ export class SubspaceProfiles {
         return (res.status == 200)
     }
 
+    public static async getConversationIds({ dmProcessId }: { dmProcessId: string }): Promise<string[]> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate DM process ID
+        SubspaceValidation.validateUserId(dmProcessId);
+
+        const path = `/${dmProcessId}/now/conversations`
+        const res = await Subspace.ao().read({ path: path }) as Record<string, IMessage>
+        console.log("res", res)
+        return Object.keys(res)
+    }
+
+    public static async getDmConversation({ dmProcessId, friendId }: { dmProcessId: string, friendId: string }): Promise<Record<string, IMessage>> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate parameters
+        SubspaceValidation.validateUserId(dmProcessId);
+        SubspaceValidation.validateFriendId(friendId);
+
+        const path = `/${dmProcessId}/now/conversations/${friendId}`
+        const res = await Subspace.ao().read({ path: path }) as Record<string, IMessage>
+        console.log("res", res)
+        return res
+    }
+
+    public static async getTempConversationIds({ dmProcessId }: { dmProcessId: string }): Promise<string[]> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate DM process ID
+        SubspaceValidation.validateUserId(dmProcessId);
+
+        const path = `/${dmProcessId}/now/temp_conversations`
+        const res = await Subspace.ao().read({ path: path }) as Record<string, IMessage>
+        console.log("res", res)
+        return Object.keys(res)
+    }
+
+    public static async getTempDmConversation({ dmProcessId, userId }: { dmProcessId: string, userId: string }): Promise<Record<string, IMessage>> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate parameters
+        SubspaceValidation.validateUserId(dmProcessId);
+        SubspaceValidation.validateUserId(userId);
+
+        const path = `/${dmProcessId}/now/temp_conversations/${userId}`
+        const res = await Subspace.ao().read({ path: path }) as Record<string, IMessage>
+        console.log("res", res)
+        return res
+    }
+
     public static async editDM({ userId, messageId, content }: { userId: string, messageId: string, content: string }): Promise<boolean> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate DM parameters
         SubspaceValidation.validateDMParams({ userId, content, messageId });
 
@@ -174,6 +234,9 @@ export class SubspaceProfiles {
     }
 
     public static async deleteDM({ userId, messageId }: { userId: string, messageId: string }): Promise<boolean> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
         // Validate DM parameters
         SubspaceValidation.validateDMParams({ userId, messageId });
 
@@ -183,5 +246,32 @@ export class SubspaceProfiles {
 
         const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
         return (res.status == 200)
+    }
+
+    public static async getDMConversation({ dmProcessId, friendId }: { dmProcessId: string, friendId: string }): Promise<Record<string, IMessage>> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate parameters
+        SubspaceValidation.validateUserId(dmProcessId);
+        SubspaceValidation.validateFriendId(friendId);
+
+        const path = `/${dmProcessId}/now/conversations/${friendId}`
+        const res = await Subspace.ao().read({ path: path }) as Record<string, IMessage>
+        console.log("res", res)
+        return res
+    }
+
+    public static async getBlockedUsers({ dmProcessId }: { dmProcessId: string }): Promise<string[]> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate DM process ID
+        SubspaceValidation.validateUserId(dmProcessId);
+
+        const path = `/${dmProcessId}/now/dm/blocked_users`
+        const res = await Subspace.ao().read({ path: path }) as Record<string, boolean>
+        console.log("blocked", res)
+        return Object.keys(res).filter(userId => res[userId] === true)
     }
 }

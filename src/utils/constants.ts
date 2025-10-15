@@ -6,13 +6,13 @@ const CommonTags: Tag[] = [
 ]
 
 export const Defaults = {
-    // HB_URL: "https://hb.arweave.tech",
-    HB_URL: "https://scheduler.forward.computer",
+    HB_URL: "https://hb.arweave.tech",
+    // HB_URL: "https://scheduler.forward.computer",
     GATEWAY_URL: "https://arweave.net"
 }
 
 export const Constants = {
-    subspaceProcess: "TMX4I6IOfou_jDrcmKEQO86Xdq8lg-u-AXTG1kPqpdM",
+    subspaceProcess: "UBdlDLIgYS0sdo4AolVdTnQ1ttwMhu8eX4PLGC9Tkls",
     // subspaceProcess: "H9T-8LoS7VJOYkMvzAJzFw7Y5piw6PtWXR8T72-0e5E",
 
     hyperAosModule: "wal-fUK-YnB9Kp5mN8dgMsSqPSqiGx-0SvwFUSwpDBI",

@@ -64,7 +64,8 @@ local function pprint(e)
 end
 
 --- @type table<string, table<string, Message>>
-conversations = {} -- {[friend_id]: {[message_id]: Message}}
+conversations = {}      -- {[friend_id]: {[message_id]: Message}}
+temp_conversations = {} -- {[user_id]: {[message_id]: Message}} -- temporary conversations for users who are not friends yet
 
 dm = dm or {
     id = id,
@@ -178,6 +179,61 @@ local utils = {
             end
         end
     },
+    temp_conversations = {
+        --- @param userId string
+        --- @return table<string, Message> | nil
+        get = function(userId)
+            return temp_conversations[userId]
+        end,
+        --- @param userId string
+        --- @param messages table<string, Message>
+        set = function(userId, messages)
+            temp_conversations[userId] = messages
+        end,
+        --- @param userId string
+        delete = function(userId)
+            temp_conversations[userId] = nil
+        end,
+        --- @param userId string
+        --- @param messageId string
+        --- @return Message | nil
+        get_message = function(userId, messageId)
+            local conv = temp_conversations[userId]
+            return conv and conv[messageId] or nil
+        end,
+        --- @param userId string
+        --- @param messageId string
+        --- @param message Message
+        set_message = function(userId, messageId, message)
+            if not temp_conversations[userId] then
+                temp_conversations[userId] = {}
+            end
+            temp_conversations[userId][messageId] = message
+        end,
+        --- @param userId string
+        --- @param messageId string
+        delete_message = function(userId, messageId)
+            if temp_conversations[userId] then
+                temp_conversations[userId][messageId] = nil
+            end
+        end,
+        --- @param userId string
+        --- @return boolean
+        has_conversation = function(userId)
+            return temp_conversations[userId] ~= nil
+        end,
+        --- @param userId string
+        --- @return number
+        get_message_count = function(userId)
+            local conv = temp_conversations[userId]
+            if not conv then return 0 end
+            local count = 0
+            for _ in pairs(conv) do
+                count = count + 1
+            end
+            return count
+        end
+    },
     friends = {
         --- @param userId string
         --- @return boolean
@@ -263,15 +319,13 @@ local function receive_message(msg)
     local content = utils.var_or_nil(msg["content"])
     local authorId = utils.var_or_nil(msg["author-id"])
     local timestamp = utils.var_or_nil(msg["timestamp"])
+    local isFriendConversation = utils.var_or_nil(msg["is-friend-conversation"])
 
     assert(friendId, "400|friend-id is required")
     assert(messageId, "400|message-id is required")
     assert(content, "400|content is required")
     assert(authorId, "400|author-id is required")
     assert(timestamp, "400|timestamp is required")
-
-    -- Verify the friend is in our friends list
-    assert(utils.friends.is_friend(friendId), "403|not friends with this user")
 
     --- @type Message
     local message = {
@@ -285,8 +339,16 @@ local function receive_message(msg)
         mentions = {}
     }
 
-    utils.conversations.set_message(friendId, messageId, message)
-    dm.message_count = dm.message_count + 1
+    -- Check if the user is a friend
+    if utils.friends.is_friend(friendId) or isFriendConversation then
+        -- Store in regular conversations
+        utils.conversations.set_message(friendId, messageId, message)
+        dm.message_count = dm.message_count + 1
+    else
+        -- Store in temporary conversations
+        utils.temp_conversations.set_message(friendId, messageId, message)
+        dm.message_count = dm.message_count + 1
+    end
 
     msg.reply({
         action = "receive-message-response",
@@ -308,16 +370,26 @@ local function edit_message(msg)
     assert(messageId, "400|message-id is required")
     assert(content, "400|content is required")
 
-    -- Verify the friend is in our friends list
-    assert(utils.friends.is_friend(friendId), "403|not friends with this user")
+    local message = nil
 
-    local message = utils.conversations.get_message(friendId, messageId)
+    -- Check if the user is a friend first
+    if utils.friends.is_friend(friendId) then
+        message = utils.conversations.get_message(friendId, messageId)
+    else
+        message = utils.temp_conversations.get_message(friendId, messageId)
+    end
+
     assert(message, "404|message not found")
 
     message.content = content
     message.edited = true
 
-    utils.conversations.set_message(friendId, messageId, message)
+    -- Store back in the appropriate conversation type
+    if utils.friends.is_friend(friendId) then
+        utils.conversations.set_message(friendId, messageId, message)
+    else
+        utils.temp_conversations.set_message(friendId, messageId, message)
+    end
 
     msg.reply({
         action = "edit-message-response",
@@ -337,13 +409,23 @@ local function delete_message(msg)
     assert(friendId, "400|friend-id is required")
     assert(messageId, "400|message-id is required")
 
-    -- Verify the friend is in our friends list
-    assert(utils.friends.is_friend(friendId), "403|not friends with this user")
+    local message = nil
 
-    local message = utils.conversations.get_message(friendId, messageId)
+    -- Check if the user is a friend first
+    if utils.friends.is_friend(friendId) then
+        message = utils.conversations.get_message(friendId, messageId)
+        if message then
+            utils.conversations.delete_message(friendId, messageId)
+        end
+    else
+        message = utils.temp_conversations.get_message(friendId, messageId)
+        if message then
+            utils.temp_conversations.delete_message(friendId, messageId)
+        end
+    end
+
     assert(message, "404|message not found")
 
-    utils.conversations.delete_message(friendId, messageId)
     dm.message_count = dm.message_count - 1
 
     msg.reply({
@@ -358,136 +440,47 @@ end)
 
 --#endregion
 
---#region conversation management
+--#region temporary conversation management
 
-local function get_conversation(msg)
-    -- Get conversation messages with a friend
-    local friendId = utils.var_or_nil(msg["friend-id"])
-    local limit = utils.var_or_nil(msg["limit"]) or 50
-    local offset = utils.var_or_nil(msg["offset"]) or 0
-
-    assert(friendId, "400|friend-id is required")
-    assert(utils.friends.is_friend(friendId), "403|not friends with this user")
-
-    local conversation = utils.conversations.get(friendId)
-    if not conversation then
-        conversation = {}
-    end
-
-    -- Convert to array and sort by timestamp for pagination
-    local messages = {}
-    for _, message in pairs(conversation) do
-        table.insert(messages, message)
-    end
-
-    -- Sort by timestamp (newest first)
-    table.sort(messages, function(a, b)
-        return a.timestamp > b.timestamp
-    end)
-
-    -- Apply pagination
-    local paginatedMessages = {}
-    local startIdx = offset + 1
-    local endIdx = math.min(startIdx + limit - 1, #messages)
-
-    for i = startIdx, endIdx do
-        table.insert(paginatedMessages, messages[i])
-    end
-
-    msg.reply({
-        action = "get-conversation-response",
-        status = helpers.status.success,
-        data = json.encode({
-            friend_id = friendId,
-            messages = paginatedMessages,
-            total_count = #messages,
-            has_more = endIdx < #messages
-        })
-    })
-end
-
-Handlers.add("get-conversation", function(msg)
-    utils.handle_run(get_conversation, msg)
-end)
-
-local function get_conversations(msg)
-    -- Get all conversations (friend list with last message info)
-    local conversationList = {}
-
-    for friendId, _ in pairs(dm.friends) do
-        local conversation = utils.conversations.get(friendId)
-        local lastMessage = nil
-        local messageCount = 0
-
-        if conversation then
-            messageCount = 0
-            local latestTimestamp = 0
-
-            -- Find the most recent message
-            for _, message in pairs(conversation) do
-                messageCount = messageCount + 1
-                local msgTimestamp = tonumber(message.timestamp) or 0
-                if msgTimestamp > latestTimestamp then
-                    latestTimestamp = msgTimestamp
-                    lastMessage = message
-                end
-            end
-        end
-
-        table.insert(conversationList, {
-            friend_id = friendId,
-            message_count = messageCount,
-            last_message = lastMessage
-        })
-    end
-
-    -- Sort by last message timestamp (newest first)
-    table.sort(conversationList, function(a, b)
-        local aTime = a.last_message and tonumber(a.last_message.timestamp) or 0
-        local bTime = b.last_message and tonumber(b.last_message.timestamp) or 0
-        return aTime > bTime
-    end)
-
-    msg.reply({
-        action = "get-conversations-response",
-        status = helpers.status.success,
-        data = json.encode({
-            conversations = conversationList,
-            total_count = #conversationList
-        })
-    })
-end
-
-Handlers.add("get-conversations", function(msg)
-    utils.handle_run(get_conversations, msg)
-end)
-
-local function clear_conversation(msg)
-    -- Clear conversation history with a friend
+local function convert_temp_to_permanent(msg)
+    -- Convert temporary conversation to permanent when users become friends
     local friendId = utils.var_or_nil(msg["friend-id"])
 
     assert(friendId, "400|friend-id is required")
-    assert(utils.friends.is_friend(friendId), "403|not friends with this user")
+    assert(utils.friends.is_friend(friendId), "400|user is not a friend")
 
-    local conversation = utils.conversations.get(friendId)
-    if conversation then
-        local messageCount = 0
-        for _ in pairs(conversation) do
-            messageCount = messageCount + 1
+    local tempConv = utils.temp_conversations.get(friendId)
+    if tempConv then
+        -- Move all messages from temporary to permanent conversation
+        for messageId, message in pairs(tempConv) do
+            utils.conversations.set_message(friendId, messageId, message)
         end
-        dm.message_count = dm.message_count - messageCount
+
+        -- Clear temporary conversation
+        utils.temp_conversations.delete(friendId)
+
+        msg.reply({
+            action = "convert-temp-to-permanent-response",
+            status = helpers.status.success,
+            data = json.encode({
+                friend_id = friendId,
+                messages_moved = utils.temp_conversations.get_message_count(friendId)
+            })
+        })
+    else
+        msg.reply({
+            action = "convert-temp-to-permanent-response",
+            status = helpers.status.success,
+            data = json.encode({
+                friend_id = friendId,
+                messages_moved = 0
+            })
+        })
     end
-
-    utils.conversations.set(friendId, {})
-
-    msg.reply({
-        action = "clear-conversation-response",
-        status = helpers.status.success
-    })
 end
 
-Handlers.add("clear-conversation", function(msg)
-    utils.handle_run(clear_conversation, msg)
+Handlers.add("convert-temp-to-permanent", function(msg)
+    utils.handle_run(convert_temp_to_permanent, msg)
 end)
 
 --#endregion
@@ -503,9 +496,21 @@ local function add_friend(msg)
     -- Add friend to the friends list
     utils.friends.add(friendId)
 
-    -- Initialize empty conversation for this friend if it doesn't exist
-    if not utils.conversations.get(friendId) then
-        utils.conversations.set(friendId, {})
+    -- Check if there's a temporary conversation to convert
+    local tempConv = utils.temp_conversations.get(friendId)
+    if tempConv then
+        -- Move all messages from temporary to permanent conversation
+        for messageId, message in pairs(tempConv) do
+            utils.conversations.set_message(friendId, messageId, message)
+        end
+
+        -- Clear temporary conversation
+        utils.temp_conversations.delete(friendId)
+    else
+        -- Initialize empty conversation for this friend if it doesn't exist
+        if not utils.conversations.get(friendId) then
+            utils.conversations.set(friendId, {})
+        end
     end
 
     msg.reply({

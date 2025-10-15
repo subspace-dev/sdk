@@ -147,7 +147,7 @@ export class AO {
         return scheduler
     }
 
-    async read<T>({ path }: { path: string }): Promise<T> {
+    async read<T>({ path, bundle = true }: { path: string, bundle?: boolean }): Promise<T> {
         let hashpath = this.hbUrl + (path.startsWith("/") ? path : "/" + path)
         // hashpath = hashpath + "/~json@1.0/serialize"
 
@@ -155,7 +155,7 @@ export class AO {
         const { result, duration } = await withDuration(() => fetch(hashpath, {
             headers: {
                 'accept': "application/json",
-                'accept-bundle': 'true',
+                'accept-bundle': bundle ? 'true' : 'false',
             }
         }))
         if (result.status != 200) {
