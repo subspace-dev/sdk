@@ -19,11 +19,28 @@ export class SubspaceProfiles {
     }
 
     static formatProfile(profile: IProfile): IProfile {
-        if (profile && profile.servers) {
-            Object.keys(profile.servers).forEach(serverId => {
-                profile.servers[serverId].approved = JSON.parse(profile.servers[serverId].approved.toString())
-            })
+        if (profile) {
+            if (profile.servers) {
+                Object.keys(profile.servers).forEach(serverId => {
+                    profile.servers[serverId].approved = JSON.parse(profile.servers[serverId].approved.toString())
+                })
+            }
+            if (profile.friends) {
+                delete profile.friends.sent["ao-types"]
+                delete profile.friends.received["ao-types"]
+                delete profile.friends.accepted["ao-types"]
+                Object.keys(profile.friends.sent).forEach(friendId => {
+                    profile.friends.sent[friendId] = JSON.parse(profile.friends.sent[friendId].toString())
+                })
+                Object.keys(profile.friends.received).forEach(friendId => {
+                    profile.friends.received[friendId] = JSON.parse(profile.friends.received[friendId].toString())
+                })
+                Object.keys(profile.friends.accepted).forEach(friendId => {
+                    profile.friends.accepted[friendId] = JSON.parse(profile.friends.accepted[friendId].toString())
+                })
+            }
         }
+        console.log("profile", profile)
         return profile
     }
 
