@@ -186,7 +186,6 @@ export class SubspaceProfiles {
 
         const path = `/${dmProcessId}/now/conversations/${friendId}`
         const res = await Subspace.ao().read({ path: path }) as Record<string, IMessage>
-        console.log("res", res)
         return res
     }
 
