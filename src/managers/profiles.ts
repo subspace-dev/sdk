@@ -40,7 +40,6 @@ export class SubspaceProfiles {
                 })
             }
         }
-        console.log("profile", profile)
         return profile
     }
 
