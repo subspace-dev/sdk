@@ -85,6 +85,18 @@ export class SubspaceProfiles {
         return this.formatProfile(res)
     }
 
+    public static async getRecentDms(dmProcessId: string): Promise<Record<string, number>> {
+        // Ensure Subspace is initialized
+        this.ensureInitialized();
+
+        // Validate DM process ID
+        SubspaceValidation.validateUserId(dmProcessId);
+
+        const path = `/${dmProcessId}/now/recents`
+        const res = await Subspace.ao().read({ path: path }) as Record<string, number> // userId: timestamp pairs
+        return res
+    }
+
     public static async updateProfile({ pfp, banner, bio }: ICreateProfile): Promise<IProfile> {
         // Ensure Subspace is initialized
         this.ensureInitialized();

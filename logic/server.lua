@@ -610,31 +610,50 @@ local function add_member(msg)
     local userId = msg["user-id"]
     local isBot = msg["is-bot"]
 
+    print("DEBUG: add_member called - senderId=" .. senderId .. ", userId=" .. userId .. ", isBot=" .. tostring(isBot))
 
     assert(senderId == subspace_id, "403|unauthorized sender")
     assert(userId, "400|user-id is required")
 
     -- Check if user is banned
-    assert(not helpers.bans[userId], "403|user is banned from this server")
+    if helpers.bans[userId] then
+        print("ERROR: User " .. userId .. " is banned from this server")
+        error("403|user is banned from this server")
+    end
 
-    local memberData = {
-        id = userId,
-        nickname = "",
-        joined_at = os.time(),
-        roles = {
-            ["@"] = "@",
-        },
-        is_bot = isBot or false,
-    }
+    -- Check if user is already a member
+    local existingMember = utils.members.get(userId)
+    if existingMember then
+        print("WARNING: User " .. userId .. " is already a member of this server, updating existing entry")
+        -- Update existing member data instead of creating new one
+        existingMember.nickname = existingMember.nickname or ""
+        existingMember.joined_at = existingMember.joined_at or os.time()
+        existingMember.is_bot = isBot or false
+        utils.members.set(userId, existingMember)
+    else
+        print("DEBUG: Creating new member entry for user " .. userId)
+        local memberData = {
+            id = userId,
+            nickname = "",
+            joined_at = os.time(),
+            roles = {
+                ["@"] = "@",
+            },
+            is_bot = isBot or false,
+        }
 
-    -- Use utils.members.set to properly update the members table
-    utils.members.set(userId, memberData)
+        -- Use utils.members.set to properly update the members table
+        utils.members.set(userId, memberData)
+    end
 
     -- Assign the @everyone role using role_utils
     role_utils.assign("@", userId)
 
-    -- Increment member count
-    server.member_count = math.max(server.member_count + 1, 0)
+    -- Only increment member count if this is a new member
+    if not existingMember then
+        server.member_count = math.max(server.member_count + 1, 0)
+        print("DEBUG: Incremented member count to " .. server.member_count)
+    end
 
     -- Push event to subscribers
     push_event({
@@ -644,12 +663,14 @@ local function add_member(msg)
         timestamp = os.time()
     })
 
+    print("DEBUG: Sending approve-add-member to subspace for user " .. userId)
     send({
         target = subspace_id,
         action = "approve-add-member",
         status = helpers.status.success,
         ["user-id"] = userId,
     })
+    print("DEBUG: approve-add-member message sent successfully")
 end
 
 Handlers.add("add-member", function(msg)
@@ -1806,7 +1827,10 @@ local function delete_message(msg)
 
     local timestamp = os.time()
 
-    utils.messages.set(messageId, nil)
+    -- Delete the message from the messages table
+    if messages[channelId] then
+        messages[channelId][messageId] = nil
+    end
 
     -- Push event to subscribers
     push_event({

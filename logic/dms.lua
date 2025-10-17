@@ -67,6 +67,9 @@ end
 conversations = {}      -- {[friend_id]: {[message_id]: Message}}
 temp_conversations = {} -- {[user_id]: {[message_id]: Message}} -- temporary conversations for users who are not friends yet
 
+--- @type table<string, number> - Rotating list of recent user IDs with timestamps
+recents = {}
+
 dm = dm or {
     id = id,
     owner_id = owner,
@@ -263,6 +266,60 @@ local utils = {
         unblock = function(userId)
             dm.blocked_users[userId] = nil
         end
+    },
+    recents = {
+        --- @param userId string
+        add = function(userId)
+            local currentTime = os.time()
+
+            -- Remove user if already exists to update timestamp
+            recents[userId] = nil
+
+            -- Add user with current timestamp
+            recents[userId] = currentTime
+        end,
+        --- @param userId string
+        remove = function(userId)
+            recents[userId] = nil
+        end,
+        --- @param limit number|nil - Maximum number of recent users to return (default: 20)
+        --- @return table<string, number>
+        get = function(limit)
+            limit = limit or 20
+            local sortedUsers = {}
+
+            for userId, timestamp in pairs(recents) do
+                table.insert(sortedUsers, { id = userId, timestamp = timestamp })
+            end
+
+            -- Sort by timestamp (most recent first)
+            table.sort(sortedUsers, function(a, b)
+                return a.timestamp > b.timestamp
+            end)
+
+            local result = {}
+            local count = 0
+            for _, user in ipairs(sortedUsers) do
+                if count >= limit then break end
+                result[user.id] = user.timestamp
+                count = count + 1
+            end
+
+            return result
+        end,
+        --- @param userId string
+        --- @return boolean
+        has = function(userId)
+            return recents[userId] ~= nil
+        end,
+        --- @return number
+        count = function()
+            local count = 0
+            for _ in pairs(recents) do
+                count = count + 1
+            end
+            return count
+        end
     }
 }
 
@@ -349,6 +406,8 @@ local function receive_message(msg)
         utils.temp_conversations.set_message(friendId, messageId, message)
         dm.message_count = dm.message_count + 1
     end
+
+    utils.recents.add(friendId)
 
     msg.reply({
         action = "receive-message-response",
@@ -552,6 +611,26 @@ end
 
 Handlers.add("get-friends", function(msg)
     utils.handle_run(get_friends, msg)
+end)
+
+local function get_recents(msg)
+    -- Get list of recent DM users
+    local limit = tonumber(msg["limit"]) or 20
+
+    local recentUsers = utils.recents.get(limit)
+
+    msg.reply({
+        action = "get-recents-response",
+        status = helpers.status.success,
+        data = json.encode({
+            recents = recentUsers,
+            count = utils.recents.count()
+        })
+    })
+end
+
+Handlers.add("get-recents", function(msg)
+    utils.handle_run(get_recents, msg)
 end)
 
 --#endregion

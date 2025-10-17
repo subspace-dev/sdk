@@ -8,11 +8,11 @@ sources = {
         version = "1.0.0"
     },
     dm = {
-        id = "tGSE7vhTLPQsDnqVI0YHzbpYo-CvNLeAhaQo7VjD8hI",
+        id = "yQudhgYT4kmMveptygCK-jj2fEKSqXo6oyTge1wEt-s",
         version = "1.0.0"
     },
     server = {
-        id = "4DByyyvwGSH3BfGel6VsJ27aSlGClEp38-tYv8Nudag",
+        id = "UmGv9HfjAzN6PiT45tjzJ3YndQxC3L9CWetO19WfKFM",
         version = "1.0.0"
     },
 }
@@ -649,48 +649,111 @@ local function join_server(msg)
     local userId = msg.from
     local serverId = utils.var_or_nil(msg["server-id"])
 
-    local entity
-    local isBot = utils.profiles.is_bot(userId)
-    if isBot then
-        entity = utils.bots.get(userId)
-    else
-        entity = utils.profiles.get(userId)
-    end
-    assert(entity, "404|" .. (isBot and "bot" or "profile") .. " not found")
+    print("DEBUG: join_server called - userId=" .. userId .. ", serverId=" .. tostring(serverId))
 
     assert(serverId, "400|server id is required")
 
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
 
+    -- Safe bot detection with error handling
+    local isBot = false
+    local botDetectionSuccess, botResult = pcall(utils.profiles.is_bot, userId)
+    if botDetectionSuccess then
+        isBot = botResult
+        print("DEBUG: Bot detection successful for user " .. userId .. ", isBot=" .. tostring(isBot))
+    else
+        print("WARNING: Could not determine if user is bot for user " ..
+            userId .. ", error: " .. tostring(botResult) .. ", assuming regular user")
+        isBot = false
+    end
+
+    local entity
+    if isBot then
+        entity = utils.bots.get(userId)
+        if not entity then
+            print("ERROR: Bot not found for user " .. userId)
+            error("404|bot not found")
+        end
+    else
+        entity = utils.profiles.get(userId)
+        if not entity then
+            print("ERROR: Profile not found for user " .. userId)
+            error("404|profile not found")
+        end
+    end
+
     if isBot then
         -- Cast entity to bot type
         local bot = entity --[[@as Bot]]
+
+        -- Check if bot is already in this server
+        if bot.servers[serverId] then
+            local existingEntry = bot.servers[serverId]
+            if existingEntry.approved then
+                print("WARNING: Bot " .. userId .. " is already approved for server " .. serverId)
+                msg.reply({
+                    action = "join-server-response",
+                    status = helpers.status.success,
+                })
+                return
+            else
+                print("WARNING: Bot " ..
+                    userId .. " already has pending request for server " .. serverId .. ", updating entry")
+            end
+        end
+
+        print("DEBUG: Adding server " .. serverId .. " to bot " .. userId .. " with approved=false")
         bot.servers[serverId] = { approved = false }
         utils.bots.set(userId, bot)
+        print("DEBUG: Bot server entry created successfully")
     else
         -- Cast entity to profile type
         local profile = entity --[[@as Profile]]
+
+        -- Check if profile is already in this server
+        if profile.servers[serverId] then
+            local existingEntry = profile.servers[serverId]
+            if existingEntry.approved then
+                print("WARNING: Profile " .. userId .. " is already approved for server " .. serverId)
+                msg.reply({
+                    action = "join-server-response",
+                    status = helpers.status.success,
+                })
+                return
+            else
+                print("WARNING: Profile " ..
+                    userId .. " already has pending request for server " .. serverId .. ", updating entry")
+            end
+        end
+
+        local orderId = utils.servers.get_next_order_id(profile)
+        print("DEBUG: Adding server " ..
+            serverId .. " to profile " .. userId .. " with order_id=" .. orderId .. " and approved=false")
         profile.servers[serverId] = {
-            order_id = utils.servers.get_next_order_id(profile),
+            order_id = orderId,
             approved = false
         }
         utils.profiles.set(userId, profile)
         utils.servers.reorder_servers(profile)
+        print("DEBUG: Profile server entry created and reordered successfully")
     end
 
     -- Send add-member request to server
+    print("DEBUG: Sending add-member request to server " .. serverId .. " for user " .. userId)
     send({
         target      = serverId,
         action      = "add-member",
         ["user-id"] = userId,
         ["is-bot"]  = isBot,
     })
+    print("DEBUG: add-member request sent successfully")
 
     msg.reply({
         action = "join-server-response",
         status = helpers.status.accepted,
     })
+    print("DEBUG: join-server-response sent to user " .. userId)
 end
 
 Handlers.add("join-server", function(msg)
@@ -701,7 +764,6 @@ local function approve_add_member(msg)
     local serverId = msg.from
     local userId = utils.var_or_nil(msg["user-id"])
     local status = utils.var_or_nil(msg["status"])
-    local isBot = utils.profiles.is_bot(userId)
 
     print("DEBUG: approve_add_member called - serverId=" ..
         serverId .. ", userId=" .. userId .. ", status=" .. tostring(status))
@@ -712,22 +774,66 @@ local function approve_add_member(msg)
     assert(userId, "400|user id is required from the server")
     assert(status, "400|status is required from the server")
 
+    -- Safe bot detection with error handling
+    local isBot = false
+    local botDetectionSuccess, botResult = pcall(utils.profiles.is_bot, userId)
+    if botDetectionSuccess then
+        isBot = botResult
+        print("DEBUG: Bot detection successful for user " .. userId .. ", isBot=" .. tostring(isBot))
+    else
+        print("WARNING: Could not determine if user is bot for user " ..
+            userId .. ", error: " .. tostring(botResult) .. ", assuming regular user")
+        isBot = false
+    end
+
     if status == helpers.status.success then
         if isBot then
             local bot = utils.bots.get(userId)
-            assert(bot, "404|bot not found")
-            assert(bot.servers[serverId], "404|bot did not trigger the join server request")
+            if not bot then
+                print("ERROR: Bot not found for user " .. userId)
+                error("404|bot not found")
+            end
+            if not bot.servers[serverId] then
+                print("ERROR: Bot " .. userId .. " did not trigger the join server request for server " .. serverId)
+                error("404|bot did not trigger the join server request")
+            end
             bot.servers[serverId].approved = true
             utils.bots.set(userId, bot)
+            print("DEBUG: Bot " .. userId .. " approved for server " .. serverId)
         else
             local profile = utils.profiles.get(userId)
-            assert(profile, "404|profile not found")
-            assert(profile.servers[serverId], "404|profile did not trigger the join server request")
+            if not profile then
+                print("ERROR: Profile not found for user " .. userId)
+                error("404|profile not found")
+            end
+            if not profile.servers[serverId] then
+                print("ERROR: Profile " .. userId .. " did not trigger the join server request for server " .. serverId)
+                error("404|profile did not trigger the join server request")
+            end
             profile.servers[serverId].approved = true
             utils.profiles.set(userId, profile)
             utils.servers.reorder_servers(profile)
+            print("DEBUG: Profile " .. userId .. " approved for server " .. serverId)
         end
     else
+        print("ERROR: Server " .. serverId .. " rejected user " .. userId .. " with status " .. tostring(status))
+        -- Remove the server entry if the server rejected the user
+        if isBot then
+            local bot = utils.bots.get(userId)
+            if bot and bot.servers[serverId] then
+                bot.servers[serverId] = nil
+                utils.bots.set(userId, bot)
+                print("DEBUG: Removed server entry from bot " .. userId .. " due to rejection")
+            end
+        else
+            local profile = utils.profiles.get(userId)
+            if profile and profile.servers[serverId] then
+                profile.servers[serverId] = nil
+                utils.profiles.set(userId, profile)
+                utils.servers.reorder_servers(profile)
+                print("DEBUG: Removed server entry from profile " .. userId .. " due to rejection")
+            end
+        end
         error(tostring(status) .. "|check server logs /" .. serverId .. "/now/helpers/logs")
     end
 end
