@@ -35,6 +35,10 @@ export class Subspace {
 
 
     static async init(options: SubspaceOptions = {}) {
+        // Force clear any existing connection
+        this.ao_ = null;
+        this.initialized = false;
+
         this.ao_ = new AO({
             GATEWAY_URL: options.GATEWAY_URL,
             HB_URL: options.HB_URL,
@@ -58,6 +62,13 @@ export class Subspace {
             throw new Error("Subspace not yet initialized")
         }
         return this.ao_;
+    }
+
+    public static clear() {
+        this.ao_ = null;
+        this.initialized = false;
+        this.address = null;
+        Utils.log({ type: "debug", label: "Subspace cleared", data: "Connection and state cleared" })
     }
 
     public static async getSources() {

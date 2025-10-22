@@ -205,7 +205,7 @@ export class SubspaceServers {
 
         const tags: Tag[] = [{ name: "Action", value: "join-server" }]
         tags.push({ name: "server-id", value: serverId })
-        log({ type: "debug", label: "Joining Server [1/2]", data: serverId })
+        log({ type: "debug", label: "Joining Server [1/2]", data: { serverId, currentAddress: Subspace.address } })
         const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
         log({ type: "output", label: "Joining Server [1/2]", data: res })
 

@@ -649,7 +649,8 @@ local function join_server(msg)
     local userId = msg.from
     local serverId = utils.var_or_nil(msg["server-id"])
 
-    print("DEBUG: join_server called - userId=" .. userId .. ", serverId=" .. tostring(serverId))
+    -- print("DEBUG: join_server called - userId=" .. userId .. ", serverId=" .. tostring(serverId))
+    -- print("DEBUG: Full message received:", json.encode(msg))
 
     assert(serverId, "400|server id is required")
 
@@ -661,10 +662,10 @@ local function join_server(msg)
     local botDetectionSuccess, botResult = pcall(utils.profiles.is_bot, userId)
     if botDetectionSuccess then
         isBot = botResult
-        print("DEBUG: Bot detection successful for user " .. userId .. ", isBot=" .. tostring(isBot))
+        -- print("DEBUG: Bot detection successful for user " .. userId .. ", isBot=" .. tostring(isBot))
     else
-        print("WARNING: Could not determine if user is bot for user " ..
-            userId .. ", error: " .. tostring(botResult) .. ", assuming regular user")
+        -- print("WARNING: Could not determine if user is bot for user " ..
+        --     userId .. ", error: " .. tostring(botResult) .. ", assuming regular user")
         isBot = false
     end
 
@@ -672,7 +673,7 @@ local function join_server(msg)
     if isBot then
         entity = utils.bots.get(userId)
         if not entity then
-            print("ERROR: Bot not found for user " .. userId)
+            -- print("ERROR: Bot not found for user " .. userId)
             error("404|bot not found")
         end
     else
@@ -757,6 +758,7 @@ local function join_server(msg)
 end
 
 Handlers.add("join-server", function(msg)
+    print("DEBUG: join-server called by user " .. msg.from)
     utils.handle_run(join_server, msg)
 end)
 

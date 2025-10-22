@@ -12,7 +12,7 @@ export const Defaults = {
 }
 
 export const Constants = {
-    subspaceProcess: "YjSqaAT6BuQzljSbuad5rE9NDoxL6DiXukT2h3ycn60",
+    subspaceProcess: "nTyq896RNyX_W0F-CxZH7x1w00FdrBmD9_Qml8EmcfU",
 
     hyperAosModule: "wal-fUK-YnB9Kp5mN8dgMsSqPSqiGx-0SvwFUSwpDBI",
     authority: "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY",

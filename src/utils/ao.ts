@@ -201,7 +201,7 @@ export class AO {
             params.data = data
         }
 
-        log({ type: "input", label: "Write Input", data: params })
+        log({ type: "input", label: "Write Input", data: { ...params, currentAddress: this.address, hasSigner: !!this.signer } })
         const { result, duration } = await withDuration(() => this.ao().request(params))
         let res = this.checkErrors(await JSON.parse((result as any).body) as WriteResponse)
         log({ type: res.error ? "error" : "output", label: res.error ? "Write Error" : "Write Success", data: res, duration })
