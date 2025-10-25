@@ -102,7 +102,7 @@ export class SubspaceServers {
         if (!serverSource) await Subspace.getSources()
         serverSource = Subspace.sources.server.lua
         if (!serverSource) throw new Error("server source not found")
-        serverSource = serverSource.replace("<<SUBSPACE>>", Constants.subspaceProcess)
+        serverSource = serverSource.replace("<<SUBSPACE>>", Subspace.subspaceProcess)
 
         // spawn a server process
         const spawnTags: Tag[] = []
@@ -111,7 +111,7 @@ export class SubspaceServers {
         await Subspace.ao().runLua({ processId: serverProcess, code: serverSource })
 
         tags.push({ name: "server-process", value: serverProcess })
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         if (!res) return null
 
         const server = await this.getServer(serverProcess)
@@ -191,7 +191,7 @@ export class SubspaceServers {
         if (!serverSource) await Subspace.getSources()
         serverSource = Subspace.sources.server.lua
         if (!serverSource) throw new Error("server source not found")
-        serverSource = serverSource.replace("<<SUBSPACE>>", Constants.subspaceProcess)
+        serverSource = serverSource.replace("<<SUBSPACE>>", Subspace.subspaceProcess)
 
         // Update the server process with the new source code
         await Subspace.ao().runLua({ processId: serverId, code: serverSource })
@@ -206,7 +206,7 @@ export class SubspaceServers {
         const tags: Tag[] = [{ name: "Action", value: "join-server" }]
         tags.push({ name: "server-id", value: serverId })
         log({ type: "debug", label: "Joining Server [1/2]", data: { serverId, currentAddress: Subspace.address } })
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         log({ type: "output", label: "Joining Server [1/2]", data: res })
 
         await new Promise(resolve => setTimeout(resolve, 1000))
@@ -246,7 +246,7 @@ export class SubspaceServers {
         const tags: Tag[] = [{ name: "Action", value: "leave-server" }]
         tags.push({ name: "server-id", value: serverId })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 

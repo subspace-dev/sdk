@@ -57,7 +57,7 @@ export class SubspaceProfiles {
         if (!dmSource) await Subspace.getSources()
         dmSource = Subspace.sources.dm.lua
         if (!dmSource) throw new Error("dm source not found")
-        dmSource = dmSource.replace("<<SUBSPACE>>", Constants.subspaceProcess)
+        dmSource = dmSource.replace("<<SUBSPACE>>", Subspace.subspaceProcess)
 
         // spawn dm process
         const dmProcess = await Subspace.ao().spawn({})
@@ -69,7 +69,7 @@ export class SubspaceProfiles {
         if (banner) tags.push({ name: "banner", value: banner })
         if (bio) tags.push({ name: "bio", value: bio })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         const createProfileRes = Subspace.ao().matchAction<IProfile>("create-profile-response", res)
         return this.formatProfile(createProfileRes)
     }
@@ -81,7 +81,7 @@ export class SubspaceProfiles {
         // Validate user ID
         SubspaceValidation.validateUserId(id);
 
-        const res = await Subspace.ao().read<IProfile>({ path: `${Constants.subspaceProcess}/now/subspace/profiles/${id}` })
+        const res = await Subspace.ao().read<IProfile>({ path: `${Subspace.subspaceProcess}/now/subspace/profiles/${id}` })
         return this.formatProfile(res)
     }
 
@@ -110,7 +110,7 @@ export class SubspaceProfiles {
         if (banner) tags.push({ name: "banner", value: banner })
         if (bio) tags.push({ name: "bio", value: bio })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         const updateProfileRes = Subspace.ao().matchAction<IProfile>("update-profile-response", res)
         return this.formatProfile(updateProfileRes)
     }
@@ -122,7 +122,7 @@ export class SubspaceProfiles {
         const tags: Tag[] = [{ name: "Action", value: "add-friend" }]
         tags.push({ name: "friend-id", value: userId })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 
@@ -133,7 +133,7 @@ export class SubspaceProfiles {
         const tags: Tag[] = [{ name: "Action", value: "accept-friend" }]
         tags.push({ name: "friend-id", value: userId })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 
@@ -144,7 +144,7 @@ export class SubspaceProfiles {
         const tags: Tag[] = [{ name: "Action", value: "reject-friend" }]
         tags.push({ name: "friend-id", value: userId })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 
@@ -155,7 +155,7 @@ export class SubspaceProfiles {
         const tags: Tag[] = [{ name: "Action", value: "remove-friend" }]
         tags.push({ name: "friend-id", value: userId })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 
@@ -170,7 +170,7 @@ export class SubspaceProfiles {
         tags.push({ name: "receiver-id", value: userId })
         tags.push({ name: "content", value: content })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 
@@ -239,7 +239,7 @@ export class SubspaceProfiles {
         tags.push({ name: "message-id", value: messageId })
         tags.push({ name: "content", value: content })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 
@@ -254,7 +254,7 @@ export class SubspaceProfiles {
         tags.push({ name: "receiver-id", value: userId })
         tags.push({ name: "message-id", value: messageId })
 
-        const res = await Subspace.ao().write({ processId: Constants.subspaceProcess, tags: tags })
+        const res = await Subspace.ao().write({ processId: Subspace.subspaceProcess, tags: tags })
         return (res.status == 200)
     }
 

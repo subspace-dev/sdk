@@ -6,6 +6,7 @@ interface SubspaceOptions {
     HB_URL?: string;
     signer?: any;
     address?: string;
+    PROCESS?: string;
 }
 
 interface Sources {
@@ -32,18 +33,20 @@ export class Subspace {
     public static initialized = false;
     private static fetchingSources = false;
     public static sources: Sources;
+    public static subspaceProcess: string;
 
 
     static async init(options: SubspaceOptions = {}) {
         // Force clear any existing connection
         this.ao_ = null;
         this.initialized = false;
+        this.subspaceProcess = options.PROCESS || Constants.subspaceProcess;
 
         this.ao_ = new AO({
             GATEWAY_URL: options.GATEWAY_URL,
             HB_URL: options.HB_URL,
             signer: options.signer,
-            address: options.address
+            address: options.address,
         });
         this.address = options.address
         this.initialized = false;
@@ -75,7 +78,7 @@ export class Subspace {
         try {
             if (this.fetchingSources) return;
             this.fetchingSources = true;
-            const s = await this.ao({ noCheck: true }).read<Sources>({ path: `/${Constants.subspaceProcess}/now/sources` })
+            const s = await this.ao({ noCheck: true }).read<Sources>({ path: `/${this.subspaceProcess}/now/sources` })
 
             const promises = [
                 fetch(`${this.ao({ noCheck: true }).gatewayUrl}/${s.bot.id}`),
