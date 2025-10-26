@@ -57,6 +57,7 @@ export class Subspace {
         } catch (error) {
             Utils.log({ type: "error", label: "Subspace initialization failed", data: error })
             this.initialized = false;
+            throw error
         }
     }
 
