@@ -49,17 +49,57 @@ export class SubspaceServers {
             if (role.hoist && typeof role.hoist == "string") {
                 role.hoist = JSON.parse(role.hoist)
             }
+            if (role.order && typeof role.order == "string") {
+                role.order = parseInt(role.order)
+            }
         }
         return role
     }
 
-    static formatServer(server: IServer): IServer {
-        if (server && server.roles) {
-            Object.keys(server.roles).forEach(roleId => {
-                server.roles[roleId] = this.formatRole(server.roles[roleId])
-            })
+    static formatChannel(channel: IChannel): IChannel {
+        if (channel) {
+            if (channel.allow_messaging && typeof channel.allow_messaging == "string") {
+                channel.allow_messaging = JSON.parse(channel.allow_messaging)
+            }
+            if (channel.allow_attachments && typeof channel.allow_attachments == "string") {
+                channel.allow_attachments = JSON.parse(channel.allow_attachments)
+            }
+            if (channel.order && typeof channel.order == "string") {
+                channel.order = parseInt(channel.order)
+            }
         }
-        return server
+        return channel
+    }
+
+    static formatCategory(category: ICategory): ICategory {
+        if (category) {
+            if (category.order && typeof category.order == "string") {
+                category.order = parseInt(category.order)
+            }
+        }
+        return category
+    }
+
+    static formatServer(server: IServer): IServer {
+        if (server) {
+            if (server.roles) {
+                Object.keys(server.roles).forEach(roleId => {
+                    server.roles[roleId] = this.formatRole(server.roles[roleId])
+                })
+            }
+            if (server.channels) {
+                Object.keys(server.channels).forEach(channelId => {
+                    server.channels[channelId] = this.formatChannel(server.channels[channelId])
+                })
+            }
+            if (server.categories) {
+                Object.keys(server.categories).forEach(categoryId => {
+                    server.categories[categoryId] = this.formatCategory(server.categories[categoryId])
+                })
+            }
+            return server
+        }
+        return null
     }
 
     static formatMember(member: IMember): IMember {

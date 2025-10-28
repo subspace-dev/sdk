@@ -304,30 +304,93 @@ local permission_utils = {
     --- @param permission number
     --- @return boolean
     member_has = function(member, permission)
+        -- Convert permission to number if it's a string number
+        local perm_num
+        if type(permission) == "string" then
+            perm_num = tonumber(permission)
+        else
+            perm_num = permission
+        end
+        -- Ensure permission is a number
+        if type(perm_num) ~= "number" then
+            utils.log("member_has", "Invalid permission type", {
+                member_id = member.id,
+                permission_type = type(permission)
+            })
+            return false
+        end
+        permission = perm_num
+
         local perm_int = 0
+        local role_perms = {}
         for roleId, _ in pairs(member.roles) do
             local role = role_utils.get(roleId)
-            if role and type(role.permissions) == "number" then
-                perm_int = perm_int | role.permissions
+            local role_perm = role and role.permissions
+            -- Convert role permission to number if it's a string number
+            if type(role_perm) == "string" then
+                role_perm = tonumber(role_perm)
+            end
+            if role_perm and type(role_perm) == "number" then
+                perm_int = perm_int | role_perm
+                role_perms[roleId] = role_perm
             end
         end
 
         -- Check for owner or administrator permission
-        if member.id == owner then return true end
-
-        -- Check for administrator permission (administrator has all permissions)
-        if perm_int & helpers.permissions.administrator == helpers.permissions.administrator then
+        if member.id == owner then
+            utils.log("member_has", "Owner bypass", {
+                member_id = member.id,
+                permission = permission,
+                result = true
+            })
             return true
         end
 
-        return perm_int & permission == permission
+        -- Check for administrator permission (administrator has all permissions)
+        if perm_int & helpers.permissions.administrator == helpers.permissions.administrator then
+            utils.log("member_has", "Administrator bypass", {
+                member_id = member.id,
+                permission = permission,
+                combined_perms = perm_int,
+                result = true
+            })
+            return true
+        end
+
+        local result = perm_int & permission == permission
+        utils.log("member_has", "Permission check", {
+            member_id = member.id,
+            permission = permission,
+            combined_perms = perm_int,
+            role_count = utils.count_keys(member.roles),
+            result = result
+        })
+
+        return result
     end,
 
     --- @param role Role
     --- @param permission number
     --- @return boolean
     role_has = function(role, permission)
-        return (role.permissions or 0) & permission == permission
+        -- Convert permission to number if it's a string number
+        local perm_num
+        if type(permission) == "string" then
+            perm_num = tonumber(permission)
+        else
+            perm_num = permission
+        end
+        -- Ensure permission is a number
+        if type(perm_num) ~= "number" then return false end
+        permission = perm_num
+
+        local role_perm = role.permissions or 0
+        -- Convert role permission to number if it's a string number
+        if type(role_perm) == "string" then
+            role_perm = tonumber(role_perm) or 0
+        end
+
+        return role_perm & permission == permission
     end,
     --- @param member Member
     --- @param permissions table<number> -- Array of permissions to check (OR logic)
@@ -336,25 +399,63 @@ local permission_utils = {
         local perm_int = 0
         for roleId, _ in pairs(member.roles) do
             local role = role_utils.get(roleId)
-            if role and type(role.permissions) == "number" then
-                perm_int = perm_int | role.permissions
+            local role_perm = role and role.permissions
+            -- Convert role permission to number if it's a string number
+            if type(role_perm) == "string" then
+                role_perm = tonumber(role_perm)
+            end
+            if role_perm and type(role_perm) == "number" then
+                perm_int = perm_int | role_perm
             end
         end
 
         -- Check for owner or administrator permission
-        if member.id == owner then return true end
+        if member.id == owner then
+            utils.log("member_has_any", "Owner bypass", {
+                member_id = member.id,
+                permissions_count = #permissions,
+                result = true
+            })
+            return true
+        end
 
         -- Check for administrator permission (administrator has all permissions)
         if perm_int & helpers.permissions.administrator == helpers.permissions.administrator then
+            utils.log("member_has_any", "Administrator bypass", {
+                member_id = member.id,
+                permissions_count = #permissions,
+                combined_perms = perm_int,
+                result = true
+            })
             return true
         end
 
         -- Check if member has any of the specified permissions
+        local matched_permission = nil
         for _, permission in ipairs(permissions) do
-            if perm_int & permission == permission then
+            -- Convert permission to number if it's a string number
+            if type(permission) == "string" then
+                permission = tonumber(permission)
+            end
+            -- Ensure each permission is a number before comparing
+            if type(permission) == "number" and perm_int & permission == permission then
+                matched_permission = permission
+                utils.log("member_has_any", "Permission matched", {
+                    member_id = member.id,
+                    matched_permission = permission,
+                    combined_perms = perm_int,
+                    result = true
+                })
                 return true
             end
         end
+
+        utils.log("member_has_any", "No permissions matched", {
+            member_id = member.id,
+            permissions_checked = #permissions,
+            combined_perms = perm_int,
+            result = false
+        })
         return false
     end,
 
@@ -399,6 +500,32 @@ end
 local utils = {
     var_or_nil = function(var)
         return var ~= "" and var or nil
+    end,
+    count_keys = function(tbl)
+        local count = 0
+        for _ in pairs(tbl) do
+            count = count + 1
+        end
+        return count
+    end,
+    log = function(context, message, data)
+        -- Safely handle nil values
+        local safe_context = context or "unknown"
+        local safe_message = message or "no message"
+        local safe_data = data or {}
+
+        local log_entry = {
+            context = safe_context,
+            message = safe_message,
+            data = safe_data,
+            timestamp = os.date("%Y-%m-%d %H:%M:%S", os.time() + 12600) -- GMT+5:30
+        }
+        table.insert(helpers.logs, log_entry)
+        -- Also print to console for debugging
+        pprint({
+            ["[" .. safe_context .. "]"] = safe_message,
+            data = safe_data
+        })
     end,
     handle_run = function(func, msg)
         msg.reply = function(data)
@@ -474,19 +601,42 @@ local utils = {
         can_send = function(channel, member)
             -- Rule 1: If channel.allowMessaging is nil, fallback to permission check
             if channel.allow_messaging == nil then
-                return permission_utils.member_has(member, helpers.permissions.send_messages)
+                local has_perm = permission_utils.member_has(member, helpers.permissions.send_messages)
+                utils.log("can_send", "Rule 1: Default permission check", {
+                    member_id = member.id,
+                    has_send_messages_perm = has_perm
+                })
+                return has_perm
             end
             -- Rule 2: If channel.allowMessaging is 1, allow everyone to message
             if channel.allow_messaging == 1 then
+                utils.log("can_send", "Rule 2: Open channel - everyone can send", {
+                    member_id = member.id,
+                    result = true
+                })
                 return true
             end
             -- Rule 3: If channel.allowMessaging is 0, only allow members with manage channel permissions and above
             if channel.allow_messaging == 0 then
-                return member.id == owner or
-                    permission_utils.member_has(member, helpers.permissions.manage_channels) or
-                    permission_utils.member_has(member, helpers.permissions.administrator)
+                local is_owner = member.id == owner
+                local has_manage_channels = permission_utils.member_has(member, helpers.permissions.manage_channels)
+                local has_admin = permission_utils.member_has(member, helpers.permissions.administrator)
+                local result = is_owner or has_manage_channels or has_admin
+
+                utils.log("can_send", "Rule 3: Restricted channel", {
+                    member_id = member.id,
+                    is_owner = is_owner,
+                    has_manage_channels = has_manage_channels,
+                    has_administrator = has_admin,
+                    result = result
+                })
+                return result
             end
             -- Default fallback (shouldn't reach here normally)
+            utils.log("can_send", "Default fallback - denying access", {
+                member_id = member.id,
+                allow_messaging = channel.allow_messaging
+            })
             return false
         end
     },
@@ -1096,6 +1246,24 @@ local function create_channel(msg)
     assert(channelName, "400|channel-name is required")
     assert(type(channelName) == "string", "400|channel-name must be a string")
 
+    -- Validate and convert allow_messaging if provided
+    if allowMessaging ~= nil then
+        if type(allowMessaging) == "string" then
+            allowMessaging = tonumber(allowMessaging)
+        end
+        assert(type(allowMessaging) == "number", "400|allow-messaging must be a number (0 or 1)")
+        assert(allowMessaging == 0 or allowMessaging == 1, "400|allow-messaging must be 0 or 1")
+    end
+
+    -- Validate and convert allow_attachments if provided
+    if allowAttachments ~= nil then
+        if type(allowAttachments) == "string" then
+            allowAttachments = tonumber(allowAttachments)
+        end
+        assert(type(allowAttachments) == "number", "400|allow-attachments must be a number (0 or 1)")
+        assert(allowAttachments == 0 or allowAttachments == 1, "400|allow-attachments must be 0 or 1")
+    end
+
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -1194,12 +1362,18 @@ local function update_channel(msg)
     end
 
     if allowMessaging ~= nil then
+        if type(allowMessaging) == "string" then
+            allowMessaging = tonumber(allowMessaging)
+        end
         assert(type(allowMessaging) == "number", "400|allow-messaging must be a number (0 or 1)")
         assert(allowMessaging == 0 or allowMessaging == 1, "400|allow-messaging must be 0 or 1")
         channel.allow_messaging = allowMessaging -- 0 = restricted, 1 = allowed, nil = default
     end
 
     if allowAttachments ~= nil then
+        if type(allowAttachments) == "string" then
+            allowAttachments = tonumber(allowAttachments)
+        end
         assert(type(allowAttachments) == "number", "400|allow-attachments must be a number (0 or 1)")
         assert(allowAttachments == 0 or allowAttachments == 1, "400|allow-attachments must be 0 or 1")
         channel.allow_attachments = allowAttachments -- 0 = restricted, 1 = allowed, nil = default
@@ -1340,15 +1514,21 @@ local function create_role(msg)
 
     local roleId = utils.get_id()
 
-    -- If no order specified, put it at the end (but before @everyone)
+    -- If no order specified, put it at the bottom (just above @everyone which is order 1)
     if not roleOrder then
-        local maxOrder = 1 -- @everyone has order 1
-        for _, role in pairs(server.roles) do
-            if role.id ~= "@" and role.order > maxOrder then
-                maxOrder = role.order
+        -- Shift all existing roles (except @everyone) up by 1 to make room at the bottom
+        for existingRoleId, existingRole in pairs(server.roles) do
+            if existingRole.id ~= "@" then
+                -- Ensure order is a number before incrementing
+                local currentOrder = tonumber(existingRole.order) or 1
+                existingRole.order = currentOrder + 1
+                utils.roles.set(existingRoleId, existingRole)
             end
         end
-        roleOrder = maxOrder + 1
+        roleOrder = 2 -- New role gets order 2, making it the lowest (except @everyone at 1)
+    else
+        -- Ensure roleOrder is a number when explicitly provided
+        roleOrder = tonumber(roleOrder) or 2
     end
 
     local role = {
@@ -1663,8 +1843,27 @@ local function send_message(msg)
     local channel = utils.channels.get(channelId)
     assert(channel, "404|channel not found")
 
+    -- Log permission check details
+    utils.log("send_message", "Checking send permissions", {
+        sender_id = senderId,
+        channel_id = channelId,
+        channel_allow_messaging = channel.allow_messaging,
+        member_roles = json.encode(senderMember.roles),
+        is_owner = senderId == owner
+    })
+
     -- Check if member can send messages in this channel
-    assert(utils.channels.can_send(channel, senderMember),
+    local can_send = utils.channels.can_send(channel, senderMember)
+
+    if not can_send then
+        utils.log("send_message", "Permission denied", {
+            sender_id = senderId,
+            channel_id = channelId,
+            reason = "insufficient permissions to send messages"
+        })
+    end
+
+    assert(can_send,
         "403|insufficient permissions to send messages in this channel")
 
     -- Validate content
@@ -1682,12 +1881,28 @@ local function send_message(msg)
         end
         -- Check if member has attachment permissions
         if channel.allow_attachments == 0 then
-            assert(utils.permissions.member_has_any(senderMember, {
+            utils.log("send_message", "Checking attachment permissions", {
+                sender_id = senderId,
+                channel_id = channelId,
+                channel_allow_attachments = channel.allow_attachments
+            })
+
+            local can_attach = utils.permissions.member_has_any(senderMember, {
                 helpers.permissions.attachments,
                 helpers.permissions.manage_channels,
                 helpers.permissions.manage_server,
                 helpers.permissions.administrator
-            }), "403|insufficient permissions to send attachments in this channel")
+            })
+
+            if not can_attach then
+                utils.log("send_message", "Attachment permission denied", {
+                    sender_id = senderId,
+                    channel_id = channelId,
+                    reason = "insufficient permissions to send attachments"
+                })
+            end
+
+            assert(can_attach, "403|insufficient permissions to send attachments in this channel")
         end
 
         assert(type(attachments) == "table", "400|attachments must be a table")
@@ -1724,6 +1939,14 @@ local function send_message(msg)
         channel_id = channelId,
         message = message,
         timestamp = timestamp
+    })
+
+    utils.log("send_message", "Message sent successfully", {
+        sender_id = senderId,
+        channel_id = channelId,
+        message_id = messageId,
+        has_attachments = #attachments > 0,
+        attachment_count = #attachments
     })
 
     msg.reply({
