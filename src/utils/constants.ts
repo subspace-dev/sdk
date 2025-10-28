@@ -6,8 +6,8 @@ const CommonTags: Tag[] = [
 ]
 
 export const Defaults = {
-    // HB_URL: "https://hb.arweave.tech",
-    HB_URL: "https://scheduler.forward.computer",
+    HB_URL: "https://hb.arweave.tech",
+    // HB_URL: "https://scheduler.forward.computer",
     GATEWAY_URL: "https://arweave.net"
 }
 

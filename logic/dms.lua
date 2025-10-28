@@ -63,6 +63,15 @@ local function pprint(e)
         colors.red .. e.error .. colors.reset)
 end
 
+-- Common logging utility for informative logs
+local function log(tag, message, data)
+    local log_msg = string.format("[%s] %s", tag, message)
+    if data then
+        log_msg = log_msg .. " | " .. json.encode(data)
+    end
+    print(log_msg)
+end
+
 --- @type table<string, table<string, Message>>
 conversations = {}      -- {[friend_id]: {[message_id]: Message}}
 temp_conversations = {} -- {[user_id]: {[message_id]: Message}} -- temporary conversations for users who are not friends yet
@@ -88,6 +97,7 @@ dm = dm or {
 
 
 local utils = {
+    log = log,
     var_or_nil = function(var)
         return var ~= "" and var or nil
     end,
@@ -384,6 +394,12 @@ local function receive_message(msg)
     assert(authorId, "400|author-id is required")
     assert(timestamp, "400|timestamp is required")
 
+    utils.log("DM_RECEIVED", "Message received", {
+        author_id = authorId,
+        conversation_with = friendId,
+        conversation_type = isFriendConversation and "friend" or "temp"
+    })
+
     --- @type Message
     local message = {
         id = messageId,
@@ -429,6 +445,11 @@ local function edit_message(msg)
     assert(messageId, "400|message-id is required")
     assert(content, "400|content is required")
 
+    utils.log("DM_EDIT", "Editing DM", {
+        conversation_with = friendId,
+        message_id = messageId
+    })
+
     local message = nil
 
     -- Check if the user is a friend first
@@ -467,6 +488,11 @@ local function delete_message(msg)
 
     assert(friendId, "400|friend-id is required")
     assert(messageId, "400|message-id is required")
+
+    utils.log("DM_DELETE", "Deleting DM", {
+        conversation_with = friendId,
+        message_id = messageId
+    })
 
     local message = nil
 
@@ -552,19 +578,29 @@ local function add_friend(msg)
 
     assert(friendId, "400|friend-id is required")
 
+    utils.log("FRIEND_ADDED", "Friend added", {
+        friend_id = friendId
+    })
+
     -- Add friend to the friends list
     utils.friends.add(friendId)
 
     -- Check if there's a temporary conversation to convert
     local tempConv = utils.temp_conversations.get(friendId)
     if tempConv then
+        local msgCount = 0
         -- Move all messages from temporary to permanent conversation
         for messageId, message in pairs(tempConv) do
             utils.conversations.set_message(friendId, messageId, message)
+            msgCount = msgCount + 1
         end
 
         -- Clear temporary conversation
         utils.temp_conversations.delete(friendId)
+        utils.log("CONV_CONVERTED", "Temporary conversation converted", {
+            friend_id = friendId,
+            message_count = msgCount
+        })
     else
         -- Initialize empty conversation for this friend if it doesn't exist
         if not utils.conversations.get(friendId) then
@@ -587,6 +623,10 @@ local function remove_friend(msg)
     local friendId = utils.var_or_nil(msg["friend-id"])
 
     assert(friendId, "400|friend-id is required")
+
+    utils.log("FRIEND_REMOVED", "Friend removed", {
+        friend_id = friendId
+    })
 
     -- Remove friend from the friends list
     utils.friends.remove(friendId)

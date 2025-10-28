@@ -101,11 +101,47 @@ end
 
 --- @param e table{timestamp: string, status: number, action: string, error: string}
 local function pprint(e)
-    -- [timestamp] status | action => error
-    print(colors.blue .. "[" .. e.timestamp .. colors.reset .. "] " ..
-        colors.bg_red .. tostring(e.status) .. colors.reset .. " | " ..
-        colors.yellow .. e.action .. colors.reset .. " => " ..
-        colors.red .. e.error .. colors.reset)
+    -- Handle both error format and log format
+    if e.timestamp and e.status and e.action and e.error then
+        -- [timestamp] status | action => error
+        print(colors.blue .. "[" .. tostring(e.timestamp) .. colors.reset .. "] " ..
+            colors.bg_red .. tostring(e.status) .. colors.reset .. " | " ..
+            colors.yellow .. tostring(e.action) .. colors.reset .. " => " ..
+            colors.red .. tostring(e.error) .. colors.reset)
+    else
+        -- Generic log format - just print the table
+        print(json.encode(e))
+    end
+end
+
+-- Define log function early so it can be used by permission_utils
+local function log_message(context, message, data)
+    -- Safely handle nil values
+    local safe_context = context or "unknown"
+    local safe_message = message or "no message"
+    local safe_data = data or {}
+
+    local log_entry = {
+        context = safe_context,
+        message = safe_message,
+        data = safe_data,
+        timestamp = os.date("%Y-%m-%d %H:%M:%S", os.time() + 12600) -- GMT+5:30
+    }
+    table.insert(helpers.logs, log_entry)
+    -- Also print to console for debugging
+    pprint({
+        ["[" .. safe_context .. "]"] = safe_message,
+        data = safe_data
+    })
+end
+
+-- Common logging utility for informative logs
+local function log(tag, message, data)
+    local log_msg = string.format("[%s] %s", tag, message)
+    if data then
+        log_msg = log_msg .. " | " .. json.encode(data)
+    end
+    print(log_msg)
 end
 
 local category_id = get_id()
@@ -313,7 +349,7 @@ local permission_utils = {
         end
         -- Ensure permission is a number
         if type(perm_num) ~= "number" then
-            utils.log("member_has", "Invalid permission type", {
+            log_message("member_has", "Invalid permission type", {
                 member_id = member.id,
                 permission_type = type(permission)
             })
@@ -338,7 +374,7 @@ local permission_utils = {
 
         -- Check for owner or administrator permission
         if member.id == owner then
-            utils.log("member_has", "Owner bypass", {
+            log_message("member_has", "Owner bypass", {
                 member_id = member.id,
                 permission = permission,
                 result = true
@@ -348,7 +384,7 @@ local permission_utils = {
 
         -- Check for administrator permission (administrator has all permissions)
         if perm_int & helpers.permissions.administrator == helpers.permissions.administrator then
-            utils.log("member_has", "Administrator bypass", {
+            log_message("member_has", "Administrator bypass", {
                 member_id = member.id,
                 permission = permission,
                 combined_perms = perm_int,
@@ -358,11 +394,16 @@ local permission_utils = {
         end
 
         local result = perm_int & permission == permission
-        utils.log("member_has", "Permission check", {
+        -- Count roles manually to avoid circular dependency
+        local role_count = 0
+        for _ in pairs(member.roles) do
+            role_count = role_count + 1
+        end
+        log_message("member_has", "Permission check", {
             member_id = member.id,
             permission = permission,
             combined_perms = perm_int,
-            role_count = utils.count_keys(member.roles),
+            role_count = role_count,
             result = result
         })
 
@@ -411,7 +452,7 @@ local permission_utils = {
 
         -- Check for owner or administrator permission
         if member.id == owner then
-            utils.log("member_has_any", "Owner bypass", {
+            log_message("member_has_any", "Owner bypass", {
                 member_id = member.id,
                 permissions_count = #permissions,
                 result = true
@@ -421,7 +462,7 @@ local permission_utils = {
 
         -- Check for administrator permission (administrator has all permissions)
         if perm_int & helpers.permissions.administrator == helpers.permissions.administrator then
-            utils.log("member_has_any", "Administrator bypass", {
+            log_message("member_has_any", "Administrator bypass", {
                 member_id = member.id,
                 permissions_count = #permissions,
                 combined_perms = perm_int,
@@ -440,7 +481,7 @@ local permission_utils = {
             -- Ensure each permission is a number before comparing
             if type(permission) == "number" and perm_int & permission == permission then
                 matched_permission = permission
-                utils.log("member_has_any", "Permission matched", {
+                log_message("member_has_any", "Permission matched", {
                     member_id = member.id,
                     matched_permission = permission,
                     combined_perms = perm_int,
@@ -450,7 +491,7 @@ local permission_utils = {
             end
         end
 
-        utils.log("member_has_any", "No permissions matched", {
+        log_message("member_has_any", "No permissions matched", {
             member_id = member.id,
             permissions_checked = #permissions,
             combined_perms = perm_int,
@@ -508,25 +549,8 @@ local utils = {
         end
         return count
     end,
-    log = function(context, message, data)
-        -- Safely handle nil values
-        local safe_context = context or "unknown"
-        local safe_message = message or "no message"
-        local safe_data = data or {}
-
-        local log_entry = {
-            context = safe_context,
-            message = safe_message,
-            data = safe_data,
-            timestamp = os.date("%Y-%m-%d %H:%M:%S", os.time() + 12600) -- GMT+5:30
-        }
-        table.insert(helpers.logs, log_entry)
-        -- Also print to console for debugging
-        pprint({
-            ["[" .. safe_context .. "]"] = safe_message,
-            data = safe_data
-        })
-    end,
+    log = log_message,
+    info_log = log,
     handle_run = function(func, msg)
         msg.reply = function(data)
             local target = msg.from
@@ -602,7 +626,7 @@ local utils = {
             -- Rule 1: If channel.allowMessaging is nil, fallback to permission check
             if channel.allow_messaging == nil then
                 local has_perm = permission_utils.member_has(member, helpers.permissions.send_messages)
-                utils.log("can_send", "Rule 1: Default permission check", {
+                log_message("can_send", "Rule 1: Default permission check", {
                     member_id = member.id,
                     has_send_messages_perm = has_perm
                 })
@@ -610,7 +634,7 @@ local utils = {
             end
             -- Rule 2: If channel.allowMessaging is 1, allow everyone to message
             if channel.allow_messaging == 1 then
-                utils.log("can_send", "Rule 2: Open channel - everyone can send", {
+                log_message("can_send", "Rule 2: Open channel - everyone can send", {
                     member_id = member.id,
                     result = true
                 })
@@ -623,7 +647,7 @@ local utils = {
                 local has_admin = permission_utils.member_has(member, helpers.permissions.administrator)
                 local result = is_owner or has_manage_channels or has_admin
 
-                utils.log("can_send", "Rule 3: Restricted channel", {
+                log_message("can_send", "Rule 3: Restricted channel", {
                     member_id = member.id,
                     is_owner = is_owner,
                     has_manage_channels = has_manage_channels,
@@ -633,7 +657,7 @@ local utils = {
                 return result
             end
             -- Default fallback (shouldn't reach here normally)
-            utils.log("can_send", "Default fallback - denying access", {
+            log_message("can_send", "Default fallback - denying access", {
                 member_id = member.id,
                 allow_messaging = channel.allow_messaging
             })
@@ -714,6 +738,11 @@ local function update_server(msg)
     local serverPfp = utils.var_or_nil(msg["server-pfp"])
     local serverBanner = utils.var_or_nil(msg["server-banner"])
 
+    utils.info_log("UPDATE_SERVER", "Updating server settings", {
+        sender_id = senderId,
+        updating_name = serverName ~= nil
+    })
+
     -- validate senderId permissions
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -760,28 +789,28 @@ local function add_member(msg)
     local userId = msg["user-id"]
     local isBot = msg["is-bot"]
 
-    print("DEBUG: add_member called - senderId=" .. senderId .. ", userId=" .. userId .. ", isBot=" .. tostring(isBot))
-
     assert(senderId == subspace_id, "403|unauthorized sender")
     assert(userId, "400|user-id is required")
 
+    utils.info_log("ADD_MEMBER", "Processing join request", {
+        user_id = userId,
+        user_type = isBot and "bot" or "user"
+    })
+
     -- Check if user is banned
     if helpers.bans[userId] then
-        print("ERROR: User " .. userId .. " is banned from this server")
         error("403|user is banned from this server")
     end
 
     -- Check if user is already a member
     local existingMember = utils.members.get(userId)
     if existingMember then
-        print("WARNING: User " .. userId .. " is already a member of this server, updating existing entry")
         -- Update existing member data instead of creating new one
         existingMember.nickname = existingMember.nickname or ""
         existingMember.joined_at = existingMember.joined_at or os.time()
         existingMember.is_bot = isBot or false
         utils.members.set(userId, existingMember)
     else
-        print("DEBUG: Creating new member entry for user " .. userId)
         local memberData = {
             id = userId,
             nickname = "",
@@ -802,7 +831,16 @@ local function add_member(msg)
     -- Only increment member count if this is a new member
     if not existingMember then
         server.member_count = math.max(server.member_count + 1, 0)
-        print("DEBUG: Incremented member count to " .. server.member_count)
+        utils.info_log("MEMBER_ADDED", "Member joined", {
+            user_id = userId,
+            user_type = isBot and "bot" or "user",
+            total_members = server.member_count
+        })
+    else
+        utils.info_log("MEMBER_UPDATED", "Member data refreshed", {
+            user_id = userId,
+            user_type = isBot and "bot" or "user"
+        })
     end
 
     -- Push event to subscribers
@@ -813,14 +851,12 @@ local function add_member(msg)
         timestamp = os.time()
     })
 
-    print("DEBUG: Sending approve-add-member to subspace for user " .. userId)
     send({
         target = subspace_id,
         action = "approve-add-member",
         status = helpers.status.success,
         ["user-id"] = userId,
     })
-    print("DEBUG: approve-add-member message sent successfully")
 end
 
 Handlers.add("add-member", function(msg)
@@ -839,6 +875,11 @@ local function remove_member(msg)
 
     local isBot = member.is_bot
 
+    utils.info_log("REMOVE_MEMBER", "Leaving server", {
+        user_id = userId,
+        user_type = isBot and "bot" or "user"
+    })
+
     -- Remove all roles first
     for roleId, _ in pairs(member.roles) do
         role_utils.unassign(roleId, userId)
@@ -853,6 +894,12 @@ local function remove_member(msg)
     end
 
     server.member_count = math.max(server.member_count - 1, 0)
+
+    utils.info_log("MEMBER_LEFT", "Member removed", {
+        user_id = userId,
+        user_type = isBot and "bot" or "user",
+        total_members = server.member_count
+    })
 
     -- Push event to subscribers
     push_event({
@@ -882,6 +929,12 @@ local function update_member(msg)
 
     local userId = msg["user-id"] or senderId
     local nickname = utils.var_or_nil(msg["nickname"])
+
+    utils.info_log("UPDATE_MEMBER", "Updating member", {
+        editor_id = senderId,
+        target_id = userId,
+        self_edit = userId == senderId
+    })
 
     local member = utils.members.get(userId)
     assert(member, "404|member not found")
@@ -926,6 +979,11 @@ local function kick_member(msg)
 
     assert(userId, "400|user-id is required")
     assert(userId ~= senderId, "400|cannot kick yourself")
+
+    utils.info_log("KICK", "Kicking member", {
+        kicked_by = senderId,
+        user_id = userId
+    })
 
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
@@ -993,6 +1051,11 @@ local function ban_member(msg)
 
     assert(userId, "400|user-id is required")
     assert(userId ~= senderId, "400|cannot ban yourself")
+
+    utils.info_log("BAN", "Banning member", {
+        banned_by = senderId,
+        user_id = userId
+    })
 
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
@@ -1080,6 +1143,11 @@ local function unban_member(msg)
 
     helpers.bans[userId] = nil
 
+    utils.info_log("UNBAN", "Member unbanned", {
+        unbanned_by = senderId,
+        user_id = userId
+    })
+
     msg.reply({
         action = "unban-member-response",
         status = helpers.status.success,
@@ -1101,6 +1169,11 @@ local function create_category(msg)
 
     assert(categoryName, "400|category-name is required")
     assert(type(categoryName) == "string", "400|category-name must be a string")
+
+    utils.info_log("CREATE_CATEGORY", "Creating category", {
+        creator_id = senderId,
+        category_name = categoryName
+    })
 
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
@@ -1153,6 +1226,11 @@ local function update_category(msg)
 
     assert(categoryId, "400|category-id is required")
 
+    utils.info_log("UPDATE_CATEGORY", "Updating category", {
+        editor_id = senderId,
+        category_id = categoryId
+    })
+
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -1195,6 +1273,11 @@ local function delete_category(msg)
     local categoryId = utils.var_or_nil(msg["category-id"])
 
     assert(categoryId, "400|category-id is required")
+
+    utils.info_log("DELETE_CATEGORY", "Deleting category", {
+        deleter_id = senderId,
+        category_id = categoryId
+    })
 
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
@@ -1245,6 +1328,12 @@ local function create_channel(msg)
 
     assert(channelName, "400|channel-name is required")
     assert(type(channelName) == "string", "400|channel-name must be a string")
+
+    utils.info_log("CREATE_CHANNEL", "Creating channel", {
+        creator_id = senderId,
+        channel_name = channelName,
+        category_id = categoryId
+    })
 
     -- Validate and convert allow_messaging if provided
     if allowMessaging ~= nil then
@@ -1327,6 +1416,11 @@ local function update_channel(msg)
 
     assert(channelId, "400|channel-id is required")
 
+    utils.info_log("UPDATE_CHANNEL", "Updating channel", {
+        editor_id = senderId,
+        channel_id = channelId
+    })
+
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -1398,6 +1492,11 @@ local function delete_channel(msg)
 
     assert(channelId, "400|channel-id is required")
 
+    utils.info_log("DELETE_CHANNEL", "Deleting channel", {
+        deleter_id = senderId,
+        channel_id = channelId
+    })
+
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -1443,6 +1542,11 @@ local function create_role(msg)
     local roleOrder = msg["role-order"]
     local mentionable = msg["mentionable"]
     local hoist = msg["hoist"]
+
+    utils.info_log("CREATE_ROLE", "Creating role", {
+        creator_id = senderId,
+        role_name = roleName
+    })
 
     -- Convert and validate rolePermissions if provided
     if rolePermissions and rolePermissions ~= 0 then
@@ -1564,6 +1668,11 @@ local function update_role(msg)
     local mentionable = utils.var_or_nil(msg["mentionable"])
     local hoist = utils.var_or_nil(msg["hoist"])
 
+    utils.info_log("UPDATE_ROLE", "Updating role", {
+        editor_id = senderId,
+        role_id = roleId
+    })
+
     -- Convert and validate rolePermissions if provided
     if rolePermissions then
         local numPermissions = tonumber(rolePermissions)
@@ -1677,6 +1786,11 @@ local function delete_role(msg)
     assert(roleId, "400|role-id is required")
     assert(roleId ~= "@", "400|cannot delete everyone role")
 
+    utils.info_log("DELETE_ROLE", "Deleting role", {
+        deleter_id = senderId,
+        role_id = roleId
+    })
+
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -1731,6 +1845,12 @@ local function assign_role(msg)
     assert(userId, "400|user-id is required")
     assert(roleId, "400|role-id is required")
 
+    utils.info_log("ASSIGN_ROLE", "Assigning role", {
+        assigner_id = senderId,
+        user_id = userId,
+        role_id = roleId
+    })
+
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -1778,6 +1898,12 @@ local function unassign_role(msg)
     assert(userId, "400|user-id is required")
     assert(roleId, "400|role-id is required")
     assert(roleId ~= "@", "400|cannot unassign everyone role")
+
+    utils.info_log("UNASSIGN_ROLE", "Unassigning role", {
+        unassigner_id = senderId,
+        user_id = userId,
+        role_id = roleId
+    })
 
     -- Get sender member to check permissions
     local senderMember = utils.members.get(senderId)
@@ -1834,6 +1960,12 @@ local function send_message(msg)
 
     assert(channelId, "400|channel-id is required")
     assert(content or #attachments > 0, "400|content or attachments required")
+
+    utils.info_log("SEND_MESSAGE", "Sending message", {
+        sender_id = senderId,
+        channel_id = channelId,
+        has_attachments = #attachments > 0
+    })
 
     -- Get sender member
     local senderMember = utils.members.get(senderId)
@@ -1970,6 +2102,12 @@ local function update_message(msg)
     assert(channelId, "400|channel-id is required")
     assert(newContent, "400|content is required")
 
+    utils.info_log("UPDATE_MESSAGE", "Updating message", {
+        editor_id = senderId,
+        message_id = messageId,
+        channel_id = channelId
+    })
+
     -- Get sender member
     local senderMember = utils.members.get(senderId)
     assert(senderMember, "404|sender not found")
@@ -2030,6 +2168,12 @@ local function delete_message(msg)
 
     assert(messageId, "400|message-id is required")
     assert(channelId, "400|channel-id is required")
+
+    utils.info_log("DELETE_MESSAGE", "Deleting message", {
+        deleter_id = senderId,
+        message_id = messageId,
+        channel_id = channelId
+    })
 
     -- Get sender member
     local senderMember = utils.members.get(senderId)
@@ -2107,6 +2251,11 @@ local function subscribe(msg)
         is_bot = true -- Always true since only bots can subscribe
     }
 
+    utils.info_log("SUBSCRIBE", "Bot subscribed to events", {
+        subscriber_id = subscriberId,
+        event_count = #events
+    })
+
     msg.reply({
         action = "subscribe-response",
         status = helpers.status.success,
@@ -2139,6 +2288,10 @@ local function unsubscribe(msg)
 
     -- Remove subscription
     server.subscribers[subscriberId] = nil
+
+    utils.info_log("UNSUBSCRIBE", "Bot unsubscribed from events", {
+        subscriber_id = subscriberId
+    })
 
     msg.reply({
         action = "unsubscribe-response",

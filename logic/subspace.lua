@@ -4,15 +4,15 @@ local json = require("json")
 
 sources = {
     bot = {
-        id = "_cLoz3kWF8GSqE2D7Dk0uTvzvVy-W-DG_oDmR3oLS9U",
+        id = "-vw84Bhkn1kz8DOoflnHYShFZMiipRrAAej1SMIsiXA",
         version = "1.0.0"
     },
     dm = {
-        id = "yQudhgYT4kmMveptygCK-jj2fEKSqXo6oyTge1wEt-s",
+        id = "MlM5C95MeDDOQSbVWQowJ-t8NFolWck2NI7lsCXpJnU",
         version = "1.0.0"
     },
     server = {
-        id = "KhpIdkDf6Cypf275UqCCuw_ExmOBz3aI3yoInW68onk",
+        id = "upYf9Zm5vbvLZBPEQHPKLaxZLmcCuSpFlgTW30XFboo",
         version = "1.0.0"
     },
 }
@@ -110,7 +110,16 @@ local function pprint(e)
         colors.red .. e.error .. colors.reset)
 end
 
+local function log(tag, message, data)
+    local log_msg = string.format("[%s] %s", tag, message)
+    if data then
+        log_msg = log_msg .. " | " .. json.encode(data)
+    end
+    print(log_msg)
+end
+
 local utils = {
+    log = log,
     var_or_nil = function(var)
         return var ~= "" and var or nil
     end,
@@ -424,6 +433,13 @@ local function create_profile(msg)
     local banner = utils.var_or_nil(msg["banner"])
     local bio = utils.var_or_nil(msg["bio"])
 
+    utils.log("CREATE_PROFILE", "Creating profile", {
+        user_id = userId,
+        has_pfp = pfp ~= nil,
+        has_banner = banner ~= nil,
+        has_bio = bio ~= nil
+    })
+
     -- Get the existing profile for this user (if any)
     local profile = utils.profiles.get(userId)
 
@@ -500,6 +516,13 @@ local function update_profile(msg)
     local banner = utils.var_or_nil(msg["banner"])
     local bio = utils.var_or_nil(msg["bio"])
 
+    utils.log("UPDATE_PROFILE", "Updating profile", {
+        user_id = userId,
+        updating_pfp = pfp ~= nil,
+        updating_banner = banner ~= nil,
+        updating_bio = bio ~= nil
+    })
+
     local profile = utils.profiles.get(userId)
     assert(profile, "404|profile not found")
 
@@ -543,6 +566,12 @@ local function create_server(msg)
     local serverPfp = utils.var_or_nil(msg["server-pfp"])
     local serverBanner = utils.var_or_nil(msg["server-banner"])
     -- serverPublic parameter removed
+
+    utils.log("CREATE_SERVER", "Creating server", {
+        owner_id = userId,
+        server_name = serverName,
+        server_id = serverProcess
+    })
 
     -- get the profile
     local profile = utils.profiles.get(userId)
@@ -607,6 +636,12 @@ local function update_server(msg)
     local serverBanner = utils.var_or_nil(msg["server-banner"])
     local serverOwner = utils.var_or_nil(msg["server-owner"])
 
+    utils.log("UPDATE_SERVER", "Updating server metadata", {
+        server_id = serverId,
+        updating_name = serverName ~= nil,
+        updating_owner = serverOwner ~= nil
+    })
+
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
 
@@ -649,9 +684,6 @@ local function join_server(msg)
     local userId = msg.from
     local serverId = utils.var_or_nil(msg["server-id"])
 
-    -- print("DEBUG: join_server called - userId=" .. userId .. ", serverId=" .. tostring(serverId))
-    -- print("DEBUG: Full message received:", json.encode(msg))
-
     assert(serverId, "400|server id is required")
 
     local server = utils.servers.get(serverId)
@@ -662,24 +694,25 @@ local function join_server(msg)
     local botDetectionSuccess, botResult = pcall(utils.profiles.is_bot, userId)
     if botDetectionSuccess then
         isBot = botResult
-        -- print("DEBUG: Bot detection successful for user " .. userId .. ", isBot=" .. tostring(isBot))
     else
-        -- print("WARNING: Could not determine if user is bot for user " ..
-        --     userId .. ", error: " .. tostring(botResult) .. ", assuming regular user")
         isBot = false
     end
+
+    utils.log("JOIN", "Requesting to join server", {
+        user_id = userId,
+        user_type = isBot and "bot" or "user",
+        server_id = serverId
+    })
 
     local entity
     if isBot then
         entity = utils.bots.get(userId)
         if not entity then
-            -- print("ERROR: Bot not found for user " .. userId)
             error("404|bot not found")
         end
     else
         entity = utils.profiles.get(userId)
         if not entity then
-            print("ERROR: Profile not found for user " .. userId)
             error("404|profile not found")
         end
     end
@@ -692,22 +725,21 @@ local function join_server(msg)
         if bot.servers[serverId] then
             local existingEntry = bot.servers[serverId]
             if existingEntry.approved then
-                print("WARNING: Bot " .. userId .. " is already approved for server " .. serverId)
+                utils.log("JOIN", "Already member of server", {
+                    user_id = userId,
+                    user_type = "bot",
+                    server_id = serverId
+                })
                 msg.reply({
                     action = "join-server-response",
                     status = helpers.status.success,
                 })
                 return
-            else
-                print("WARNING: Bot " ..
-                    userId .. " already has pending request for server " .. serverId .. ", updating entry")
             end
         end
 
-        print("DEBUG: Adding server " .. serverId .. " to bot " .. userId .. " with approved=false")
         bot.servers[serverId] = { approved = false }
         utils.bots.set(userId, bot)
-        print("DEBUG: Bot server entry created successfully")
     else
         -- Cast entity to profile type
         local profile = entity --[[@as Profile]]
@@ -716,49 +748,43 @@ local function join_server(msg)
         if profile.servers[serverId] then
             local existingEntry = profile.servers[serverId]
             if existingEntry.approved then
-                print("WARNING: Profile " .. userId .. " is already approved for server " .. serverId)
+                utils.log("JOIN", "Already member of server", {
+                    user_id = userId,
+                    user_type = "user",
+                    server_id = serverId
+                })
                 msg.reply({
                     action = "join-server-response",
                     status = helpers.status.success,
                 })
                 return
-            else
-                print("WARNING: Profile " ..
-                    userId .. " already has pending request for server " .. serverId .. ", updating entry")
             end
         end
 
         local orderId = utils.servers.get_next_order_id(profile)
-        print("DEBUG: Adding server " ..
-            serverId .. " to profile " .. userId .. " with order_id=" .. orderId .. " and approved=false")
         profile.servers[serverId] = {
             order_id = orderId,
             approved = false
         }
         utils.profiles.set(userId, profile)
         utils.servers.reorder_servers(profile)
-        print("DEBUG: Profile server entry created and reordered successfully")
     end
 
     -- Send add-member request to server
-    print("DEBUG: Sending add-member request to server " .. serverId .. " for user " .. userId)
     send({
         target      = serverId,
         action      = "add-member",
         ["user-id"] = userId,
         ["is-bot"]  = isBot,
     })
-    print("DEBUG: add-member request sent successfully")
 
     msg.reply({
         action = "join-server-response",
         status = helpers.status.accepted,
     })
-    print("DEBUG: join-server-response sent to user " .. userId)
 end
 
 Handlers.add("join-server", function(msg)
-    print("DEBUG: join-server called by user " .. msg.from)
     utils.handle_run(join_server, msg)
 end)
 
@@ -766,9 +792,6 @@ local function approve_add_member(msg)
     local serverId = msg.from
     local userId = utils.var_or_nil(msg["user-id"])
     local status = utils.var_or_nil(msg["status"])
-
-    print("DEBUG: approve_add_member called - serverId=" ..
-        serverId .. ", userId=" .. userId .. ", status=" .. tostring(status))
 
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
@@ -781,51 +804,51 @@ local function approve_add_member(msg)
     local botDetectionSuccess, botResult = pcall(utils.profiles.is_bot, userId)
     if botDetectionSuccess then
         isBot = botResult
-        print("DEBUG: Bot detection successful for user " .. userId .. ", isBot=" .. tostring(isBot))
     else
-        print("WARNING: Could not determine if user is bot for user " ..
-            userId .. ", error: " .. tostring(botResult) .. ", assuming regular user")
         isBot = false
     end
 
     if status == helpers.status.success then
+        utils.log("APPROVE", "Member approved", {
+            user_id = userId,
+            user_type = isBot and "bot" or "user",
+            server_id = serverId
+        })
         if isBot then
             local bot = utils.bots.get(userId)
             if not bot then
-                print("ERROR: Bot not found for user " .. userId)
                 error("404|bot not found")
             end
             if not bot.servers[serverId] then
-                print("ERROR: Bot " .. userId .. " did not trigger the join server request for server " .. serverId)
                 error("404|bot did not trigger the join server request")
             end
             bot.servers[serverId].approved = true
             utils.bots.set(userId, bot)
-            print("DEBUG: Bot " .. userId .. " approved for server " .. serverId)
         else
             local profile = utils.profiles.get(userId)
             if not profile then
-                print("ERROR: Profile not found for user " .. userId)
                 error("404|profile not found")
             end
             if not profile.servers[serverId] then
-                print("ERROR: Profile " .. userId .. " did not trigger the join server request for server " .. serverId)
                 error("404|profile did not trigger the join server request")
             end
             profile.servers[serverId].approved = true
             utils.profiles.set(userId, profile)
             utils.servers.reorder_servers(profile)
-            print("DEBUG: Profile " .. userId .. " approved for server " .. serverId)
         end
     else
-        print("ERROR: Server " .. serverId .. " rejected user " .. userId .. " with status " .. tostring(status))
+        utils.log("REJECT", "Member rejected", {
+            user_id = userId,
+            user_type = isBot and "bot" or "user",
+            server_id = serverId,
+            status = tostring(status)
+        })
         -- Remove the server entry if the server rejected the user
         if isBot then
             local bot = utils.bots.get(userId)
             if bot and bot.servers[serverId] then
                 bot.servers[serverId] = nil
                 utils.bots.set(userId, bot)
-                print("DEBUG: Removed server entry from bot " .. userId .. " due to rejection")
             end
         else
             local profile = utils.profiles.get(userId)
@@ -833,7 +856,6 @@ local function approve_add_member(msg)
                 profile.servers[serverId] = nil
                 utils.profiles.set(userId, profile)
                 utils.servers.reorder_servers(profile)
-                print("DEBUG: Removed server entry from profile " .. userId .. " due to rejection")
             end
         end
         error(tostring(status) .. "|check server logs /" .. serverId .. "/now/helpers/logs")
@@ -855,6 +877,11 @@ local function leave_server(msg)
 
     -- check if user is the server owner
     assert(server.owner ~= userId, "403|server owner cannot leave their own server")
+
+    utils.log("LEAVE", "Leaving server", {
+        user_id = userId,
+        server_id = serverId
+    })
 
     -- check if user is a member of the server
     local isMember = false
@@ -904,6 +931,12 @@ local function approve_remove_member(msg)
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
 
+    utils.log("REMOVE", "Member removed", {
+        user_id = userId,
+        user_type = isBot and "bot" or "user",
+        server_id = serverId
+    })
+
     if isBot then
         local bot = utils.bots.get(userId)
         assert(bot, "404|bot not found")
@@ -936,6 +969,12 @@ local function update_server_order(msg)
 
     assert(serverId, "400|server id is required")
     assert(orderId, "400|order id is required")
+
+    utils.log("UPDATE_SERVER_ORDER", "Updating server order", {
+        user_id = userId,
+        server_id = serverId,
+        order_id = orderId
+    })
 
     local server = utils.servers.get(serverId)
     assert(server, "404|server not found")
@@ -970,6 +1009,11 @@ local function add_friend(msg)
     local senderId = msg.from
     local receiverId = utils.var_or_nil(msg["friend-id"])
 
+    utils.log("ADD_FRIEND", "Friend request sent", {
+        sender_id = senderId,
+        receiver_id = receiverId
+    })
+
     local senderProfile = utils.profiles.get(senderId)
     assert(senderProfile, "404|sender profile not found")
 
@@ -979,7 +1023,14 @@ local function add_friend(msg)
     assert(receiverProfile, "404|receiver profile not found")
 
     -- Use the send_friend_request utility function
-    utils.profiles.send_friend_request(senderProfile, receiverProfile)
+    local status = utils.profiles.send_friend_request(senderProfile, receiverProfile)
+
+    if status == "accepted" then
+        utils.log("FRIEND_AUTO_ACCEPTED", "Friend request auto-accepted", {
+            user1_id = senderId,
+            user2_id = receiverId
+        })
+    end
 
     msg.reply({
         action = "add-friend-response",
@@ -994,6 +1045,11 @@ end)
 local function accept_friend(msg)
     local senderId = msg.from
     local receiverId = utils.var_or_nil(msg["friend-id"])
+
+    utils.log("ACCEPT_FRIEND", "Friend request accepted", {
+        accepter_id = senderId,
+        requester_id = receiverId
+    })
 
     local senderProfile = utils.profiles.get(senderId)
     assert(senderProfile, "404|sender profile not found")
@@ -1020,6 +1076,11 @@ local function reject_friend(msg)
     local senderId = msg.from
     local receiverId = utils.var_or_nil(msg["friend-id"])
 
+    utils.log("REJECT_FRIEND", "Friend request rejected", {
+        rejecter_id = senderId,
+        requester_id = receiverId
+    })
+
     local senderProfile = utils.profiles.get(senderId)
     assert(senderProfile, "404|sender profile not found")
 
@@ -1044,6 +1105,11 @@ end)
 local function remove_friend(msg)
     local senderId = msg.from
     local receiverId = utils.var_or_nil(msg["friend-id"])
+
+    utils.log("REMOVE_FRIEND", "Friendship removed", {
+        user1_id = senderId,
+        user2_id = receiverId
+    })
 
     local senderProfile = utils.profiles.get(senderId)
     assert(senderProfile, "404|sender profile not found")
@@ -1080,6 +1146,12 @@ local function send_dm(msg)
 
     assert(receiverId, "400|receiver-id is required")
     assert(content, "400|content is required")
+
+    utils.log("SEND_DM", "Sending DM", {
+        sender_id = senderId,
+        receiver_id = receiverId,
+        message_id = messageId
+    })
 
     local senderProfile = utils.profiles.get(senderId)
     assert(senderProfile, "404|sender profile not found")
@@ -1152,6 +1224,12 @@ local function edit_dm(msg)
     assert(messageId, "400|message-id is required")
     assert(content, "400|content is required")
 
+    utils.log("EDIT_DM", "Editing DM", {
+        sender_id = senderId,
+        receiver_id = receiverId,
+        message_id = messageId
+    })
+
     local senderProfile = utils.profiles.get(senderId)
     assert(senderProfile, "404|sender profile not found")
 
@@ -1204,6 +1282,12 @@ local function delete_dm(msg)
 
     assert(receiverId, "400|receiver-id is required")
     assert(messageId, "400|message-id is required")
+
+    utils.log("DELETE_DM", "Deleting DM", {
+        sender_id = senderId,
+        receiver_id = receiverId,
+        message_id = messageId
+    })
 
     local senderProfile = utils.profiles.get(senderId)
     assert(senderProfile, "404|sender profile not found")
@@ -1281,6 +1365,14 @@ local function create_bot(msg)
     local description = utils.var_or_nil(msg["description"])
     local requiredEvents = utils.var_or_nil(msg["required-events"])
 
+    utils.log("CREATE_BOT", "Creating bot", {
+        owner_id = userId,
+        bot_id = botProcess,
+        bot_name = name,
+        public = public or false,
+        event_count = requiredEvents and #requiredEvents or 0
+    })
+
     local profile = utils.profiles.get(userId)
     assert(profile, "404|profile not found")
 
@@ -1353,6 +1445,13 @@ local function update_bot(msg)
     local description = utils.var_or_nil(msg["description"])
     local requiredEvents = utils.var_or_nil(msg["required-events"])
 
+    utils.log("UPDATE_BOT", "Updating bot", {
+        owner_id = userId,
+        bot_id = botProcess,
+        updating_name = name ~= nil,
+        updating_events = requiredEvents ~= nil
+    })
+
     local profile = utils.profiles.get(userId)
     assert(profile, "404|profile not found")
 
@@ -1402,6 +1501,11 @@ end)
 local function remove_bot(msg)
     local userId = msg.from
     local botProcess = utils.var_or_nil(msg["bot-process"])
+
+    utils.log("REMOVE_BOT", "Removing bot", {
+        owner_id = userId,
+        bot_id = botProcess
+    })
 
     local profile = utils.profiles.get(userId)
     assert(profile, "404|profile not found")

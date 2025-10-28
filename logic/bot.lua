@@ -88,6 +88,15 @@ local function pprint(e)
         colors.red .. e.error .. colors.reset)
 end
 
+-- Common logging utility for informative logs
+local function log(tag, message, data)
+    local log_msg = string.format("[%s] %s", tag, message)
+    if data then
+        log_msg = log_msg .. " | " .. json.encode(data)
+    end
+    print(log_msg)
+end
+
 ---@class Bot
 bot = bot or {
     id = id,
@@ -107,6 +116,7 @@ bot = bot or {
 --#region utils
 
 local utils = {
+    log = log,
     var_or_nil = function(var)
         return var ~= "" and var or nil
     end,
@@ -294,12 +304,19 @@ local function join_server(msg)
 
     -- Check if already approved in server
     if bot.servers[serverId] and bot.servers[serverId].approved then
+        utils.log("BOT_JOIN", "Already member of server", {
+            server_id = serverId
+        })
         msg.reply({
             action = "join-server-response",
             status = helpers.status.success,
         })
         return
     end
+
+    utils.log("BOT_JOIN", "Requesting to join server", {
+        server_id = serverId
+    })
 
     -- Send join request to subspace
     send({
@@ -323,6 +340,10 @@ local function leave_server(msg)
 
     assert(serverId, "400|server-id is required")
     assert(bot.servers[serverId], "404|bot is not in this server")
+
+    utils.log("BOT_LEAVE", "Leaving server", {
+        server_id = serverId
+    })
 
     -- Check if bot is the server owner (bots can own servers too)
     -- We need to get server info from subspace to check ownership
@@ -364,6 +385,9 @@ local function add_member_response(msg)
     assert(status, "400|status is required from the server")
 
     if status == helpers.status.success then
+        utils.log("BOT_APPROVED", "Approved to join server", {
+            server_id = serverId
+        })
         -- Bot was approved to join server
         bot.servers[serverId] = { approved = true }
 
@@ -381,6 +405,10 @@ local function add_member_response(msg)
             status = helpers.status.success,
         })
     else
+        utils.log("BOT_REJECTED", "Rejected from server", {
+            server_id = serverId,
+            status = tostring(status)
+        })
         -- Bot was rejected
         bot.servers[serverId] = nil
         error(tostring(status) .. "|bot was rejected from server")
@@ -405,6 +433,12 @@ local function send_message(msg)
     assert(serverId, "400|server-id is required")
     assert(channelId, "400|channel-id is required")
     assert(content or (attachments and #attachments > 0), "400|content or attachments required")
+
+    utils.log("BOT_SEND_MESSAGE", "Bot sending message", {
+        server_id = serverId,
+        channel_id = channelId,
+        has_attachments = attachments and #attachments > 0 or false
+    })
 
     -- Check if bot is in the server
     assert(bot.servers[serverId] and bot.servers[serverId].approved, "403|bot is not approved in this server")
@@ -439,6 +473,12 @@ local function edit_message(msg)
     assert(messageId, "400|message-id is required")
     assert(content, "400|content is required")
 
+    utils.log("BOT_EDIT_MESSAGE", "Bot editing message", {
+        server_id = serverId,
+        channel_id = channelId,
+        message_id = messageId
+    })
+
     -- Check if bot is in the server
     assert(bot.servers[serverId] and bot.servers[serverId].approved, "403|bot is not approved in this server")
 
@@ -468,6 +508,12 @@ local function delete_message(msg)
     assert(serverId, "400|server-id is required")
     assert(channelId, "400|channel-id is required")
     assert(messageId, "400|message-id is required")
+
+    utils.log("BOT_DELETE_MESSAGE", "Bot deleting message", {
+        server_id = serverId,
+        channel_id = channelId,
+        message_id = messageId
+    })
 
     -- Check if bot is in the server
     assert(bot.servers[serverId] and bot.servers[serverId].approved, "403|bot is not approved in this server")
@@ -500,6 +546,11 @@ local function subscribe_to_server(msg)
     assert(serverId, "400|server-id is required")
     assert(bot.servers[serverId] and bot.servers[serverId].approved, "403|bot is not approved in this server")
 
+    utils.log("BOT_SUBSCRIBE", "Subscribing to events", {
+        server_id = serverId,
+        event_count = #events
+    })
+
     send({
         target = serverId,
         action = "subscribe",
@@ -521,6 +572,10 @@ local function unsubscribe_from_server(msg)
 
     assert(serverId, "400|server-id is required")
     assert(utils.servers.is_subscribed(serverId), "404|not subscribed to this server")
+
+    utils.log("BOT_UNSUBSCRIBE", "Unsubscribing from events", {
+        server_id = serverId
+    })
 
     send({
         target = serverId,
